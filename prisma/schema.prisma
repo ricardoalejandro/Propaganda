@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Contact {
+  id          String    @id @default(uuid())
+  phoneNumber String    @unique
+  name        String?
+  profilePic  String?
+  status      String    @default("NEW") // NEW, CONTACTED, QUALIFIED, PROPOSAL, CLOSED
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  conversations Conversation[]
+  observations  Observation[]
+  leads         Lead[]
+
+  @@index([phoneNumber])
+}
+
+model Conversation {
+  id           String    @id @default(uuid())
+  phoneNumber  String
+  name         String?
+  isGroup      Boolean   @default(false)
+  lastMessageAt DateTime @default(now())
+  unreadCount  Int       @default(0)
+  
+  contact      Contact   @relation(fields: [phoneNumber], references: [phoneNumber])
+  messages     Message[]
+
+  @@index([phoneNumber])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id             String       @id
+  conversationId String
+  body           String
+  fromMe         Boolean
+  type           String       @default("chat")
+  timestamp      DateTime     @default(now())
+  hasMedia       Boolean      @default(false)
+  
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId])
+  @@index([timestamp])
+}
+
+model Observation {
+  id        String   @id @default(uuid())
+  contactId String
+  content   String
+  createdAt DateTime @default(now())
+  
+  contact   Contact  @relation(fields: [contactId], references: [id])
+}
+
+model Lead {
+  id          String   @id @default(uuid())
+  contactId   String
+  stage       String   @default("NEW") // Stages logic
+  value       Float?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  contact     Contact  @relation(fields: [contactId], references: [id])
+}

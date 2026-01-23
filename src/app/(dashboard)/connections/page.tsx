@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { Header } from '@/components/layout'
@@ -39,10 +39,102 @@ import {
   Loader2,
   Wifi,
   WifiOff,
+  AlertCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import Image from 'next/image'
 import { cn } from '@/lib/utils'
+
+// Componente para mostrar el QR con manejo de errores y countdown
+function QRImageDisplay({ 
+  qrLink, 
+  duration = 30, 
+  onRefresh 
+}: { 
+  qrLink: string
+  duration?: number
+  onRefresh: () => void 
+}) {
+  const [imageError, setImageError] = useState(false)
+  const [imageLoading, setImageLoading] = useState(true)
+  const [countdown, setCountdown] = useState(duration)
+
+  // Reset state cuando cambia el qrLink
+  useEffect(() => {
+    setImageError(false)
+    setImageLoading(true)
+    setCountdown(duration)
+  }, [qrLink, duration])
+
+  // Countdown timer
+  useEffect(() => {
+    if (countdown <= 0) {
+      setImageError(true)
+      return
+    }
+    const timer = setInterval(() => {
+      setCountdown(prev => prev - 1)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [countdown])
+
+  if (imageError || countdown <= 0) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-8">
+        <div className="w-64 h-64 bg-slate-100 rounded-lg flex flex-col items-center justify-center">
+          <AlertCircle className="w-12 h-12 text-slate-400 mb-2" />
+          <p className="text-sm text-slate-500 text-center px-4">
+            El QR ha expirado
+          </p>
+        </div>
+        <Button variant="outline" onClick={onRefresh}>
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Generar nuevo QR
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="p-4 bg-white rounded-lg border relative">
+        {imageLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white">
+            <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+          </div>
+        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={qrLink}
+          alt="QR Code"
+          className={cn(
+            "w-64 h-64 object-contain transition-opacity",
+            imageLoading && "opacity-0"
+          )}
+          onLoad={() => setImageLoading(false)}
+          onError={() => {
+            setImageLoading(false)
+            setImageError(true)
+          }}
+        />
+      </div>
+      <p className={cn(
+        "text-sm font-medium",
+        countdown <= 10 ? "text-red-500" : "text-slate-500"
+      )}>
+        El QR expira en {countdown} segundos
+      </p>
+      <Button 
+        variant="outline" 
+        size="sm" 
+        onClick={onRefresh}
+      >
+        <RefreshCw className="w-4 h-4 mr-2" />
+        Actualizar QR
+      </Button>
+    </div>
+  )
+}
 
 interface WhatsAppAccount {
   id: string
@@ -207,6 +299,7 @@ export default function ConnectionsPage() {
 
   const openQrDialog = (account: WhatsAppAccount) => {
     setSelectedAccount(account)
+    setQrTimestamp(Date.now()) // Forzar nuevo QR al abrir
     setIsQrOpen(true)
   }
 
@@ -488,7 +581,13 @@ export default function ConnectionsPage() {
       </div>
 
       {/* QR Dialog */}
-      <Dialog open={isQrOpen} onOpenChange={setIsQrOpen}>
+      <Dialog open={isQrOpen} onOpenChange={(open) => {
+        setIsQrOpen(open)
+        if (!open) {
+          // Limpiar al cerrar
+          queryClient.removeQueries({ queryKey: ['account-qr'] })
+        }
+      }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Escanear código QR</DialogTitle>
@@ -500,37 +599,14 @@ export default function ConnectionsPage() {
             {qrLoading ? (
               <div className="flex items-center justify-center h-64">
                 <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+                <span className="ml-2 text-slate-500">Generando QR...</span>
               </div>
             ) : qrData?.qrLink ? (
-              <div className="flex flex-col items-center gap-4">
-                <div className="p-4 bg-white rounded-lg border">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    key={qrData.timestamp || qrTimestamp}
-                    src={`${qrData.qrLink}?t=${qrData.timestamp || Date.now()}`}
-                    alt="QR Code"
-                    className="w-64 h-64 object-contain"
-                    onError={(e) => {
-                      // Si la imagen falla, mostrar placeholder
-                      const target = e.target as HTMLImageElement
-                      target.style.opacity = '0.3'
-                    }}
-                  />
-                </div>
-                <p className="text-sm text-slate-500">
-                  El QR expira en {qrData.duration || 30} segundos
-                </p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => {
-                    setQrTimestamp(Date.now())
-                  }}
-                >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Actualizar QR
-                </Button>
-              </div>
+              <QRImageDisplay 
+                qrLink={qrData.qrLink} 
+                duration={qrData.duration}
+                onRefresh={() => setQrTimestamp(Date.now())}
+              />
             ) : qrData?.status === 'CONNECTED' ? (
               <div className="flex flex-col items-center gap-4 py-8">
                 <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">

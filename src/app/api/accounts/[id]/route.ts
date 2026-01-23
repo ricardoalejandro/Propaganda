@@ -22,18 +22,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Obtener estado actualizado de difusion
+    // Obtener dispositivos conectados de difusion
     try {
-      const status = await difusion.getDeviceStatus(account.deviceId)
-      const newStatus = status.results.is_logged_in ? 'CONNECTED' : 'DISCONNECTED'
+      const devices = await difusion.listDevices()
+      const isConnected = devices.some(
+        d => d.device === account.deviceId || d.name === account.deviceId
+      )
+      const newStatus = isConnected ? 'CONNECTED' : 'DISCONNECTED'
       
-      if (account.status !== newStatus) {
+      if (account.status !== newStatus && account.status !== 'SCANNING') {
         const updated = await prisma.whatsAppAccount.update({
           where: { id },
           data: {
             status: newStatus,
-            phoneNumber: status.results.phone_number || account.phoneNumber,
-            displayName: status.results.push_name || account.displayName,
             connectedAt: newStatus === 'CONNECTED' ? new Date() : account.connectedAt,
           },
         })
@@ -63,9 +64,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const account = await prisma.whatsAppAccount.update({
       where: { id },
       data: {
-        filial,
-        encargado,
-        displayName,
+        ...(filial !== undefined && { filial }),
+        ...(encargado !== undefined && { encargado }),
+        ...(displayName !== undefined && { displayName }),
       },
     })
 
@@ -95,11 +96,11 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Eliminar de difusion
+    // Logout en difusion si está conectado
     try {
-      await difusion.deleteDevice(account.deviceId)
+      await difusion.logoutDevice(account.deviceId)
     } catch {
-      // Continuar aunque falle en difusion
+      // Ignorar errores
     }
 
     // Eliminar de nuestra BD

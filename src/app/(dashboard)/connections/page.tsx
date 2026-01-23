@@ -48,35 +48,36 @@ interface WhatsAppAccount {
   id: string
   deviceId: string
   phoneNumber: string | null
-  name: string | null
+  displayName: string | null
   filial: string | null
   encargado: string | null
-  status: 'disconnected' | 'connecting' | 'connected' | 'qr_pending'
+  status: 'CONNECTED' | 'DISCONNECTED' | 'SCANNING' | 'ERROR'
+  connectedAt: string | null
   createdAt: string
   updatedAt: string
 }
 
-const statusConfig = {
-  connected: {
+const statusConfig: Record<string, { label: string; icon: typeof CheckCircle2; color: string; dot: string }> = {
+  CONNECTED: {
     label: 'Conectado',
     icon: CheckCircle2,
     color: 'bg-green-100 text-green-800 border-green-200',
     dot: 'bg-green-500',
   },
-  connecting: {
-    label: 'Conectando...',
-    icon: Clock,
-    color: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    dot: 'bg-yellow-500',
-  },
-  qr_pending: {
+  SCANNING: {
     label: 'Escanear QR',
     icon: QrCode,
     color: 'bg-blue-100 text-blue-800 border-blue-200',
     dot: 'bg-blue-500',
   },
-  disconnected: {
+  DISCONNECTED: {
     label: 'Desconectado',
+    icon: XCircle,
+    color: 'bg-red-100 text-red-800 border-red-200',
+    dot: 'bg-red-500',
+  },
+  ERROR: {
+    label: 'Error',
     icon: XCircle,
     color: 'bg-red-100 text-red-800 border-red-200',
     dot: 'bg-red-500',
@@ -304,7 +305,7 @@ export default function ConnectionsPage() {
             <CardHeader className="pb-2">
               <CardDescription>Conectadas</CardDescription>
               <CardTitle className="text-3xl text-green-600">
-                {accounts.filter((a) => a.status === 'connected').length}
+                {accounts.filter((a) => a.status === 'CONNECTED').length}
               </CardTitle>
             </CardHeader>
           </Card>
@@ -312,7 +313,7 @@ export default function ConnectionsPage() {
             <CardHeader className="pb-2">
               <CardDescription>Pendientes QR</CardDescription>
               <CardTitle className="text-3xl text-blue-600">
-                {accounts.filter((a) => a.status === 'qr_pending').length}
+                {accounts.filter((a) => a.status === 'SCANNING').length}
               </CardTitle>
             </CardHeader>
           </Card>
@@ -320,7 +321,7 @@ export default function ConnectionsPage() {
             <CardHeader className="pb-2">
               <CardDescription>Desconectadas</CardDescription>
               <CardTitle className="text-3xl text-red-600">
-                {accounts.filter((a) => a.status === 'disconnected').length}
+                {accounts.filter((a) => a.status === 'DISCONNECTED').length}
               </CardTitle>
             </CardHeader>
           </Card>
@@ -389,7 +390,7 @@ export default function ConnectionsPage() {
                         </div>
                         <div>
                           <CardTitle className="text-base">
-                            {account.name || account.phoneNumber || account.deviceId}
+                            {account.displayName || account.phoneNumber || account.deviceId}
                           </CardTitle>
                           <CardDescription>
                             {account.phoneNumber || 'Sin número'}
@@ -403,7 +404,7 @@ export default function ConnectionsPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          {account.status !== 'connected' && (
+                          {account.status !== 'CONNECTED' && (
                             <DropdownMenuItem onClick={() => openQrDialog(account)}>
                               <QrCode className="w-4 h-4 mr-2" />
                               Ver código QR
@@ -416,7 +417,7 @@ export default function ConnectionsPage() {
                             <RefreshCw className="w-4 h-4 mr-2" />
                             Reconectar
                           </DropdownMenuItem>
-                          {account.status === 'connected' && (
+                          {account.status === 'CONNECTED' && (
                             <DropdownMenuItem
                               onClick={() => logoutMutation.mutate(account.id)}
                               disabled={logoutMutation.isPending}
@@ -465,7 +466,7 @@ export default function ConnectionsPage() {
                       </div>
                     )}
 
-                    {account.status !== 'connected' && (
+                    {account.status !== 'CONNECTED' && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -498,21 +499,24 @@ export default function ConnectionsPage() {
               <div className="flex items-center justify-center h-64">
                 <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
               </div>
-            ) : qrData?.qr ? (
+            ) : qrData?.qrLink ? (
               <div className="flex flex-col items-center gap-4">
                 <div className="p-4 bg-white rounded-lg border">
                   <img
-                    src={`data:image/png;base64,${qrData.qr}`}
+                    src={qrData.qrLink}
                     alt="QR Code"
                     className="w-64 h-64"
                   />
                 </div>
+                <p className="text-sm text-slate-500">
+                  El QR expira en {qrData.duration || 30} segundos
+                </p>
                 <Button variant="outline" size="sm" onClick={() => refetchQr()}>
                   <RefreshCw className="w-4 h-4 mr-2" />
                   Actualizar QR
                 </Button>
               </div>
-            ) : qrData?.status === 'connected' ? (
+            ) : qrData?.status === 'CONNECTED' ? (
               <div className="flex flex-col items-center gap-4 py-8">
                 <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
                   <CheckCircle2 className="w-8 h-8 text-green-600" />

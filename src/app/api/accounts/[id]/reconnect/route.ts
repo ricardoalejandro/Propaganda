@@ -25,17 +25,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Reconectar en difusion
     await difusion.reconnectDevice(account.deviceId)
 
-    // Obtener nuevo estado
-    const status = await difusion.getDeviceStatus(account.deviceId)
-    const newStatus = status.results.is_logged_in ? 'CONNECTED' : 'DISCONNECTED'
+    // Verificar estado después de reconectar
+    const devices = await difusion.listDevices()
+    const isConnected = devices.some(
+      d => d.device === account.deviceId || d.name === account.deviceId
+    )
+    const newStatus = isConnected ? 'CONNECTED' : 'DISCONNECTED'
 
     // Actualizar en BD
     const updated = await prisma.whatsAppAccount.update({
       where: { id },
       data: {
         status: newStatus,
-        phoneNumber: status.results.phone_number || account.phoneNumber,
-        displayName: status.results.push_name || account.displayName,
         connectedAt: newStatus === 'CONNECTED' ? new Date() : account.connectedAt,
       },
     })

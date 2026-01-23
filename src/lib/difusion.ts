@@ -1,5 +1,9 @@
 /**
  * Cliente API para difusion.naperu.cloud (go-whatsapp-web-multidevice)
+ * 
+ * Documentación: La API usa:
+ * - GET con query params para /app/* endpoints
+ * - POST con JSON body para /send/* endpoints
  */
 
 const DIFUSION_URL = process.env.DIFUSION_URL || 'https://difusion.naperu.cloud'
@@ -12,20 +16,41 @@ const getAuthHeader = () => {
   return `Basic ${credentials}`
 }
 
-// Helper para hacer requests
-async function difusionFetch<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
+// Helper para hacer requests GET
+async function difusionGet<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
+  const url = new URL(`${DIFUSION_URL}${endpoint}`)
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      url.searchParams.append(key, value)
+    })
+  }
+  
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers: {
+      'Authorization': getAuthHeader(),
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`Difusion API Error: ${response.status} - ${error}`)
+  }
+
+  return response.json()
+}
+
+// Helper para hacer requests POST
+async function difusionPost<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
   const url = `${DIFUSION_URL}${endpoint}`
   
   const response = await fetch(url, {
-    ...options,
+    method: 'POST',
     headers: {
       'Authorization': getAuthHeader(),
       'Content-Type': 'application/json',
-      ...options.headers,
     },
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {
@@ -41,386 +66,216 @@ async function difusionFetch<T>(
 // ============================================
 
 export interface DifusionDevice {
-  device_id: string
-  display_name: string
-  jid: string
-  created_at: string
-  updated_at: string
+  name: string
+  device: string
 }
 
-export interface DifusionQRResponse {
+export interface DifusionResponse<T = unknown> {
   code: string
   message: string
-  results: {
-    qr_link: string
-    qr_duration: number
-  }
+  results?: T
 }
 
-export interface DifusionStatusResponse {
-  code: string
-  message: string
-  results: {
-    is_logged_in: boolean
-    phone_number?: string
-    push_name?: string
-  }
+export interface DifusionQRResult {
+  qr_link: string
+  qr_duration: number
 }
 
-export interface SendMessageRequest {
-  phone: string
-  message: string
-  reply_message_id?: string
-}
-
-export interface SendMessageResponse {
-  code: string
-  message: string
-  results: {
-    message_id: string
-    status: string
-  }
+export interface SendMessageResult {
+  message_id: string
+  status: string
 }
 
 // ============================================
-// DISPOSITIVOS
+// DISPOSITIVOS / APP
 // ============================================
 
 /**
- * Listar todos los dispositivos
+ * Listar todos los dispositivos conectados
+ * GET /app/devices
  */
 export async function listDevices(): Promise<DifusionDevice[]> {
-  const response = await difusionFetch<{ code: string; results: DifusionDevice[] }>('/devices')
+  const response = await difusionGet<DifusionResponse<DifusionDevice[]>>('/app/devices')
   return response.results || []
 }
 
 /**
- * Agregar un nuevo dispositivo
+ * Login / Obtener QR para conectar un dispositivo
+ * GET /app/login?phone={phone}
+ * 
+ * El "phone" actúa como device_id único
  */
-export async function addDevice(displayName?: string): Promise<DifusionDevice> {
-  const response = await difusionFetch<{ code: string; results: DifusionDevice }>('/devices', {
-    method: 'POST',
-    body: JSON.stringify({ display_name: displayName || 'Nueva cuenta' }),
-  })
+export async function loginDevice(phone: string): Promise<DifusionQRResult> {
+  const response = await difusionGet<DifusionResponse<DifusionQRResult>>('/app/login', { phone })
+  if (!response.results) {
+    throw new Error('No QR returned from API')
+  }
   return response.results
-}
-
-/**
- * Obtener info de un dispositivo
- */
-export async function getDevice(deviceId: string): Promise<DifusionDevice> {
-  const response = await difusionFetch<{ code: string; results: DifusionDevice }>(
-    `/devices/${encodeURIComponent(deviceId)}`
-  )
-  return response.results
-}
-
-/**
- * Eliminar un dispositivo
- */
-export async function deleteDevice(deviceId: string): Promise<void> {
-  await difusionFetch(`/devices/${encodeURIComponent(deviceId)}`, {
-    method: 'DELETE',
-  })
-}
-
-/**
- * Obtener QR para login
- */
-export async function getDeviceQR(deviceId: string): Promise<DifusionQRResponse> {
-  return difusionFetch<DifusionQRResponse>(
-    `/devices/${encodeURIComponent(deviceId)}/login`
-  )
 }
 
 /**
  * Logout de un dispositivo
+ * GET /app/logout?phone={phone}
  */
-export async function logoutDevice(deviceId: string): Promise<void> {
-  await difusionFetch(`/devices/${encodeURIComponent(deviceId)}/logout`, {
-    method: 'POST',
-  })
+export async function logoutDevice(phone: string): Promise<void> {
+  await difusionGet<DifusionResponse>('/app/logout', { phone })
 }
 
 /**
  * Reconectar un dispositivo
+ * GET /app/reconnect?phone={phone}
  */
-export async function reconnectDevice(deviceId: string): Promise<void> {
-  await difusionFetch(`/devices/${encodeURIComponent(deviceId)}/reconnect`, {
-    method: 'POST',
-  })
-}
-
-/**
- * Obtener estado de un dispositivo
- */
-export async function getDeviceStatus(deviceId: string): Promise<DifusionStatusResponse> {
-  return difusionFetch<DifusionStatusResponse>(
-    `/devices/${encodeURIComponent(deviceId)}/status`
-  )
+export async function reconnectDevice(phone: string): Promise<void> {
+  await difusionGet<DifusionResponse>('/app/reconnect', { phone })
 }
 
 // ============================================
-// MENSAJES
+// ENVÍO DE MENSAJES
 // ============================================
 
 /**
  * Enviar mensaje de texto
+ * POST /send/message
  */
 export async function sendMessage(
-  deviceId: string,
   phone: string,
   message: string,
   replyMessageId?: string
-): Promise<SendMessageResponse> {
-  return difusionFetch<SendMessageResponse>('/send/message', {
-    method: 'POST',
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-    body: JSON.stringify({
-      phone,
-      message,
-      reply_message_id: replyMessageId,
-    }),
-  })
+): Promise<SendMessageResult> {
+  const body: Record<string, unknown> = { phone, message }
+  if (replyMessageId) {
+    body.reply_message_id = replyMessageId
+  }
+  
+  const response = await difusionPost<DifusionResponse<SendMessageResult>>('/send/message', body)
+  return response.results || { message_id: '', status: 'sent' }
 }
 
 /**
  * Enviar imagen
+ * POST /send/image
  */
 export async function sendImage(
-  deviceId: string,
   phone: string,
   imageUrl: string,
   caption?: string
-): Promise<SendMessageResponse> {
-  return difusionFetch<SendMessageResponse>('/send/image', {
-    method: 'POST',
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-    body: JSON.stringify({
-      phone,
-      image: imageUrl,
-      caption,
-    }),
-  })
+): Promise<SendMessageResult> {
+  const body: Record<string, unknown> = { phone, image: imageUrl }
+  if (caption) {
+    body.caption = caption
+  }
+  
+  const response = await difusionPost<DifusionResponse<SendMessageResult>>('/send/image', body)
+  return response.results || { message_id: '', status: 'sent' }
 }
 
 /**
- * Enviar documento
+ * Enviar documento/archivo
+ * POST /send/file
  */
 export async function sendDocument(
-  deviceId: string,
   phone: string,
-  documentUrl: string,
-  filename?: string,
-  caption?: string
-): Promise<SendMessageResponse> {
-  return difusionFetch<SendMessageResponse>('/send/document', {
-    method: 'POST',
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-    body: JSON.stringify({
-      phone,
-      document: documentUrl,
-      filename,
-      caption,
-    }),
-  })
+  fileUrl: string,
+  filename?: string
+): Promise<SendMessageResult> {
+  const body: Record<string, unknown> = { phone, document: fileUrl }
+  if (filename) {
+    body.filename = filename
+  }
+  
+  const response = await difusionPost<DifusionResponse<SendMessageResult>>('/send/file', body)
+  return response.results || { message_id: '', status: 'sent' }
 }
 
 /**
  * Enviar audio
+ * POST /send/audio
  */
 export async function sendAudio(
-  deviceId: string,
   phone: string,
   audioUrl: string
-): Promise<SendMessageResponse> {
-  return difusionFetch<SendMessageResponse>('/send/audio', {
-    method: 'POST',
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-    body: JSON.stringify({
-      phone,
-      audio: audioUrl,
-    }),
+): Promise<SendMessageResult> {
+  const response = await difusionPost<DifusionResponse<SendMessageResult>>('/send/audio', {
+    phone,
+    audio: audioUrl,
   })
+  return response.results || { message_id: '', status: 'sent' }
 }
 
 /**
  * Enviar video
+ * POST /send/video
  */
 export async function sendVideo(
-  deviceId: string,
   phone: string,
   videoUrl: string,
   caption?: string
-): Promise<SendMessageResponse> {
-  return difusionFetch<SendMessageResponse>('/send/video', {
-    method: 'POST',
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-    body: JSON.stringify({
-      phone,
-      video: videoUrl,
-      caption,
-    }),
-  })
+): Promise<SendMessageResult> {
+  const body: Record<string, unknown> = { phone, video: videoUrl }
+  if (caption) {
+    body.caption = caption
+  }
+  
+  const response = await difusionPost<DifusionResponse<SendMessageResult>>('/send/video', body)
+  return response.results || { message_id: '', status: 'sent' }
 }
 
 /**
  * Enviar ubicación
+ * POST /send/location
  */
 export async function sendLocation(
-  deviceId: string,
   phone: string,
   latitude: number,
   longitude: number,
   name?: string
-): Promise<SendMessageResponse> {
-  return difusionFetch<SendMessageResponse>('/send/location', {
-    method: 'POST',
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-    body: JSON.stringify({
-      phone,
-      latitude,
-      longitude,
-      name,
-    }),
-  })
-}
-
-/**
- * Marcar mensaje como leído
- */
-export async function markMessageRead(
-  deviceId: string,
-  messageId: string
-): Promise<void> {
-  await difusionFetch(`/message/${encodeURIComponent(messageId)}/read`, {
-    method: 'POST',
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-  })
+): Promise<SendMessageResult> {
+  const body: Record<string, unknown> = { phone, latitude, longitude }
+  if (name) {
+    body.name = name
+  }
+  
+  const response = await difusionPost<DifusionResponse<SendMessageResult>>('/send/location', body)
+  return response.results || { message_id: '', status: 'sent' }
 }
 
 // ============================================
-// USUARIO
+// WEBHOOKS / MENSAJES RECIBIDOS
 // ============================================
 
-/**
- * Obtener info del usuario conectado
- */
-export async function getUserInfo(deviceId: string) {
-  return difusionFetch<{
-    code: string
-    results: {
-      phone_number: string
-      push_name: string
-      platform: string
-    }
-  }>('/user/info', {
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-  })
+export interface WebhookMessage {
+  message_id: string
+  phone: string
+  device?: string
+  sender: string
+  message: string
+  reply_to?: string
+  pushname?: string
+  timestamp?: number
+  type?: 'text' | 'image' | 'document' | 'audio' | 'video' | 'location' | 'contact'
+  media_url?: string
 }
 
 /**
- * Obtener contactos
+ * Parsear webhook de mensaje recibido
  */
-export async function getContacts(deviceId: string) {
-  return difusionFetch<{
-    code: string
-    results: Array<{
-      jid: string
-      name: string
-      notify: string
-    }>
-  }>('/user/my/contacts', {
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-  })
-}
+export function parseWebhookMessage(body: unknown): WebhookMessage | null {
+  if (!body || typeof body !== 'object') {
+    return null
+  }
 
-// ============================================
-// CHATS
-// ============================================
-
-/**
- * Obtener lista de chats
- */
-export async function getChats(deviceId: string, limit = 50, offset = 0) {
-  return difusionFetch<{
-    code: string
-    results: Array<{
-      jid: string
-      name: string
-      last_message_time: string
-      unread_count: number
-    }>
-  }>(`/chats?limit=${limit}&offset=${offset}`, {
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-  })
-}
-
-/**
- * Obtener mensajes de un chat
- */
-export async function getChatMessages(
-  deviceId: string,
-  chatJid: string,
-  limit = 50
-) {
-  return difusionFetch<{
-    code: string
-    results: Array<{
-      id: string
-      chat_jid: string
-      sender: string
-      content: string
-      timestamp: string
-      is_from_me: boolean
-      media_type?: string
-      filename?: string
-    }>
-  }>(`/chat/${encodeURIComponent(chatJid)}/messages?limit=${limit}`, {
-    headers: {
-      'X-Device-Id': deviceId,
-    },
-  })
-}
-
-export default {
-  listDevices,
-  addDevice,
-  getDevice,
-  deleteDevice,
-  getDeviceQR,
-  logoutDevice,
-  reconnectDevice,
-  getDeviceStatus,
-  sendMessage,
-  sendImage,
-  sendDocument,
-  sendAudio,
-  sendVideo,
-  sendLocation,
-  markMessageRead,
-  getUserInfo,
-  getContacts,
-  getChats,
-  getChatMessages,
+  const data = body as Record<string, unknown>
+  
+  return {
+    message_id: String(data.message_id || data.id || ''),
+    phone: String(data.phone || data.from || ''),
+    device: data.device ? String(data.device) : undefined,
+    sender: String(data.sender || data.from || ''),
+    message: String(data.message || data.body || data.text || ''),
+    reply_to: data.reply_to ? String(data.reply_to) : undefined,
+    pushname: data.pushname ? String(data.pushname) : undefined,
+    timestamp: data.timestamp ? Number(data.timestamp) : Date.now(),
+    type: data.type as WebhookMessage['type'] || 'text',
+    media_url: data.media_url ? String(data.media_url) : undefined,
+  }
 }

@@ -47,33 +47,33 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { phone } = parseJid(conversation.chatJid)
     
     let result: any
-    const deviceId = conversation.account.deviceId
 
     // Enviar según tipo de mensaje
+    // La API de difusion usa solo el phone del destinatario
     switch (type) {
       case 'image':
-        result = await difusion.sendImage(deviceId, phone, mediaUrl!, caption)
+        result = await difusion.sendImage(phone, mediaUrl!, caption)
         break
       
       case 'document':
-        result = await difusion.sendDocument(deviceId, phone, mediaUrl!, fileName, caption)
+        result = await difusion.sendDocument(phone, mediaUrl!, fileName)
         break
       
       case 'audio':
-        result = await difusion.sendAudio(deviceId, phone, mediaUrl!)
+        result = await difusion.sendAudio(phone, mediaUrl!)
         break
       
       case 'video':
-        result = await difusion.sendVideo(deviceId, phone, mediaUrl!, caption)
+        result = await difusion.sendVideo(phone, mediaUrl!, caption)
         break
       
       case 'location':
         const [lat, lng] = content.split(',').map(Number)
-        result = await difusion.sendLocation(deviceId, phone, lat, lng)
+        result = await difusion.sendLocation(phone, lat, lng)
         break
       
       default:
-        result = await difusion.sendMessage(deviceId, phone, content)
+        result = await difusion.sendMessage(phone, content)
     }
 
     // Guardar mensaje en BD

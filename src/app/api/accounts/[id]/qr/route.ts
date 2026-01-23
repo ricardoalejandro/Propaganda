@@ -28,12 +28,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       data: { status: 'SCANNING' },
     })
 
-    // Obtener QR de difusion
-    const qrResponse = await difusion.getDeviceQR(account.deviceId)
+    // Obtener QR de difusion usando loginDevice
+    const qrResult = await difusion.loginDevice(account.deviceId)
 
     return NextResponse.json({
-      qrLink: qrResponse.results.qr_link,
-      duration: qrResponse.results.qr_duration,
+      qrLink: qrResult.qr_link,
+      duration: qrResult.qr_duration,
     })
   } catch (error) {
     console.error('Error getting QR:', error)

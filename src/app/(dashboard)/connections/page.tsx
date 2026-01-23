@@ -197,9 +197,10 @@ export default function ConnectionsPage() {
     refetchInterval: 10000, // Refresh every 10s
   })
 
-  // Fetch QR Code
+  // Fetch QR Code con polling para detectar conexión
   const [qrTimestamp, setQrTimestamp] = useState(0)
-  const { data: qrData, isLoading: qrLoading, refetch: refetchQr } = useQuery({
+  
+  const { data: qrData, isLoading: qrLoading } = useQuery({
     queryKey: ['account-qr', selectedAccount?.id, qrTimestamp],
     queryFn: async () => {
       if (!selectedAccount) return null
@@ -207,9 +208,26 @@ export default function ConnectionsPage() {
       return res.data
     },
     enabled: !!selectedAccount && isQrOpen,
-    staleTime: 0, // Siempre considerar stale para forzar refetch
-    gcTime: 0, // No cachear el QR
+    staleTime: 0,
+    gcTime: 0,
+    refetchInterval: isQrOpen ? 2000 : false,
   })
+
+  // Cerrar diálogo cuando se detecta conexión
+  useEffect(() => {
+    if (isQrOpen && qrData && qrData.status === 'CONNECTED') {
+      // Pequeño delay para que el usuario vea el mensaje de éxito
+      const timer = setTimeout(() => {
+        toast.success('¡Conectado!', {
+          description: 'WhatsApp vinculado exitosamente',
+        })
+        setIsQrOpen(false)
+        setSelectedAccount(null)
+        queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [isQrOpen, qrData, queryClient])
 
   // Add account mutation
   const addMutation = useMutation({
@@ -271,8 +289,9 @@ export default function ConnectionsPage() {
 
   // Delete mutation
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await axios.delete(`/api/accounts/${id}`)
+    mutationFn: async ({ id, force = false }: { id: string; force?: boolean }) => {
+      const url = force ? `/api/accounts/${id}?force=true` : `/api/accounts/${id}`
+      const res = await axios.delete(url)
       return res.data
     },
     onSuccess: () => {
@@ -280,8 +299,24 @@ export default function ConnectionsPage() {
       toast.success('Cuenta eliminada')
     },
     onError: (err: any) => {
+      const errorData = err.response?.data
+      // Si hay leads asociados, preguntar si quiere forzar
+      if (errorData?.leadsCount > 0) {
+        const shouldForce = confirm(
+          `${errorData.error}\n\n¿Deseas eliminar también los ${errorData.leadsCount} lead(s) asociados?`
+        )
+        if (shouldForce) {
+          // Extraer el ID de la URL del request fallido
+          const failedUrl = err.config?.url || ''
+          const match = failedUrl.match(/\/api\/accounts\/([^?]+)/)
+          if (match) {
+            deleteMutation.mutate({ id: match[1], force: true })
+          }
+        }
+        return
+      }
       toast.error('Error al eliminar', {
-        description: err.response?.data?.error || 'Intenta de nuevo',
+        description: errorData?.error || 'Intenta de nuevo',
       })
     },
   })
@@ -526,7 +561,7 @@ export default function ConnectionsPage() {
                             className="text-red-600"
                             onClick={() => {
                               if (confirm('¿Eliminar esta cuenta?')) {
-                                deleteMutation.mutate(account.id)
+                                deleteMutation.mutate({ id: account.id })
                               }
                             }}
                           >
@@ -628,7 +663,7 @@ export default function ConnectionsPage() {
                   onClick={() => {
                     if (selectedAccount) {
                       reconnectMutation.mutate(selectedAccount.id)
-                      setTimeout(() => refetchQr(), 2000)
+                      setTimeout(() => setQrTimestamp(Date.now()), 2000)
                     }
                   }}
                 >

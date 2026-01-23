@@ -11,6 +11,7 @@ import {
   BarChart3,
   ChevronLeft,
   ChevronRight,
+  FileText,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -47,6 +48,12 @@ const navItems = [
     description: 'Estadísticas',
   },
   {
+    name: 'Logs',
+    href: '/logs',
+    icon: FileText,
+    description: 'Logs del sistema',
+  },
+  {
     name: 'Configuración',
     href: '/settings',
     icon: Settings,
@@ -57,6 +64,7 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+
 
   return (
     <TooltipProvider delayDuration={0}>

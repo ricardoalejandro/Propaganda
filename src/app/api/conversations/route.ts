@@ -27,10 +27,17 @@ export async function GET(request: NextRequest) {
       where,
       include: {
         account: {
-          select: { phoneNumber: true, filial: true },
+          select: { id: true, deviceId: true, phoneNumber: true, filial: true },
         },
         lead: {
-          select: { name: true, phoneNumber: true, stage: true },
+          select: { 
+            id: true,
+            name: true, 
+            phoneNumber: true, 
+            value: true,
+            stage: { select: { name: true, color: true } },
+            funnel: { select: { name: true } },
+          },
         },
         messages: {
           orderBy: { timestamp: 'desc' },
@@ -45,6 +52,115 @@ export async function GET(request: NextRequest) {
     console.error('Error fetching conversations:', error)
     return NextResponse.json(
       { error: 'Error al obtener las conversaciones' },
+      { status: 500 }
+    )
+  }
+}
+
+// POST /api/conversations - Crear o obtener conversación para un lead
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { leadId } = body
+
+    if (!leadId) {
+      return NextResponse.json(
+        { error: 'leadId es requerido' },
+        { status: 400 }
+      )
+    }
+
+    // Obtener el lead con su cuenta de origen
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId },
+      include: {
+        sourceAccount: true,
+      },
+    })
+
+    if (!lead) {
+      return NextResponse.json(
+        { error: 'Lead no encontrado' },
+        { status: 404 }
+      )
+    }
+
+    if (!lead.sourceAccount) {
+      return NextResponse.json(
+        { error: 'El lead no tiene una cuenta de WhatsApp asociada' },
+        { status: 400 }
+      )
+    }
+
+    // Crear JID del contacto (formato WhatsApp)
+    const cleanPhone = lead.phoneNumber.replace(/\D/g, '')
+    const chatJid = `${cleanPhone}@s.whatsapp.net`
+
+    // Buscar conversación existente
+    let conversation = await prisma.conversation.findFirst({
+      where: {
+        accountId: lead.sourceAccountId,
+        leadId: lead.id,
+      },
+      include: {
+        account: {
+          select: { id: true, deviceId: true, phoneNumber: true, filial: true },
+        },
+        lead: {
+          select: { 
+            id: true,
+            name: true, 
+            phoneNumber: true, 
+            value: true,
+            stage: { select: { name: true, color: true } },
+            funnel: { select: { name: true } },
+          },
+        },
+        messages: {
+          orderBy: { timestamp: 'desc' },
+          take: 20,
+        },
+      },
+    })
+
+    // Si no existe, crear una nueva
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
+        data: {
+          chatJid,
+          contactPhone: lead.phoneNumber,
+          contactName: lead.name,
+          accountId: lead.sourceAccountId,
+          leadId: lead.id,
+          lastMessageAt: new Date(),
+        },
+        include: {
+          account: {
+            select: { id: true, deviceId: true, phoneNumber: true, filial: true },
+          },
+          lead: {
+            select: { 
+              id: true,
+              name: true, 
+              phoneNumber: true, 
+              value: true,
+              stage: { select: { name: true, color: true } },
+              funnel: { select: { name: true } },
+            },
+          },
+          messages: {
+            orderBy: { timestamp: 'desc' },
+            take: 20,
+          },
+        },
+      })
+    }
+
+    return NextResponse.json({ conversation }, { status: 201 })
+  } catch (error) {
+    console.error('Error creating conversation:', error)
+    return NextResponse.json(
+      { error: 'Error al crear la conversación' },
       { status: 500 }
     )
   }

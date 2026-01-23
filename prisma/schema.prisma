@@ -243,5 +243,48 @@ model Settings {
   companyName     String @default("Mi Empresa")
   defaultCurrency String @default("PEN")
 
+  // Configuración de logs
+  logsEnabled     Boolean @default(true)
+
   updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// SISTEMA DE LOGS
+// ============================================
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     LogLevel @default(INFO)
+  category  String   // connection, lead, message, api, webhook, etc.
+  action    String   // Acción específica: qr_generate, lead_create, etc.
+  message   String   // Mensaje descriptivo
+  details   Json?    // Detalles adicionales en JSON
+  
+  // Contexto
+  accountId String?  // ID de cuenta WA relacionada
+  leadId    String?  // ID de lead relacionado
+  
+  // Request info
+  requestId String?  // ID único de request
+  ip        String?
+  userAgent String?
+  
+  // Error info
+  error     String?  // Mensaje de error si aplica
+  stack     String?  // Stack trace si aplica
+  
+  createdAt DateTime @default(now())
+
+  @@index([level])
+  @@index([category])
+  @@index([createdAt])
+  @@index([accountId])
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
 }

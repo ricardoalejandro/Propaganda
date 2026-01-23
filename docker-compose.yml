@@ -9,6 +9,11 @@ services:
     restart: always
     ports:
       - "5000:5000"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - DATABASE_URL=postgresql://propaganda_user:propaganda_secure_pass_2024@postgres:5432/propaganda
       - REDIS_URL=redis://redis:6379

@@ -81,9 +81,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 }
 
 // DELETE /api/accounts/:id - Eliminar cuenta
+// Query params: ?force=true para eliminar también leads asociados
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+    const { searchParams } = new URL(request.url)
+    const force = searchParams.get('force') === 'true'
 
     const account = await prisma.whatsAppAccount.findUnique({
       where: { id },
@@ -102,6 +105,34 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     } catch {
       // Ignorar errores
     }
+
+    // Verificar si hay leads asociados a esta cuenta
+    const leadsCount = await prisma.lead.count({
+      where: { sourceAccountId: id },
+    })
+
+    if (leadsCount > 0 && !force) {
+      return NextResponse.json(
+        { 
+          error: `No se puede eliminar: hay ${leadsCount} lead(s) asociados a esta cuenta.`,
+          leadsCount,
+          hint: 'Usa ?force=true para eliminar también los leads, o elimínalos/reasígnalos primero.'
+        },
+        { status: 400 }
+      )
+    }
+
+    // Si force=true, eliminar leads asociados
+    if (force && leadsCount > 0) {
+      await prisma.lead.deleteMany({
+        where: { sourceAccountId: id },
+      })
+    }
+
+    // Eliminar conversaciones asociadas a esta cuenta
+    await prisma.conversation.deleteMany({
+      where: { accountId: id },
+    })
 
     // Eliminar de nuestra BD
     await prisma.whatsAppAccount.delete({

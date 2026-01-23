@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { Header } from '@/components/layout'
@@ -111,7 +112,17 @@ interface Funnel {
 }
 
 // Lead Card Component
-function LeadCard({ lead, isDragging }: { lead: Lead; isDragging?: boolean }) {
+function LeadCard({ 
+  lead, 
+  isDragging,
+  onStartConversation,
+  isStartingConversation,
+}: { 
+  lead: Lead
+  isDragging?: boolean
+  onStartConversation?: (leadId: string) => void
+  isStartingConversation?: boolean
+}) {
   return (
     <Card
       className={cn(
@@ -139,9 +150,19 @@ function LeadCard({ lead, isDragging }: { lead: Lead; isDragging?: boolean }) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>
-                <MessageSquare className="w-4 h-4 mr-2" />
-                Ver conversación
+              <DropdownMenuItem 
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onStartConversation?.(lead.id)
+                }}
+                disabled={isStartingConversation}
+              >
+                {isStartingConversation ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                )}
+                Iniciar conversación
               </DropdownMenuItem>
               <DropdownMenuItem>
                 <Phone className="w-4 h-4 mr-2" />
@@ -185,7 +206,15 @@ function LeadCard({ lead, isDragging }: { lead: Lead; isDragging?: boolean }) {
 }
 
 // Sortable Lead Item
-function SortableLeadItem({ lead }: { lead: Lead }) {
+function SortableLeadItem({ 
+  lead,
+  onStartConversation,
+  isStartingConversation,
+}: { 
+  lead: Lead
+  onStartConversation?: (leadId: string) => void
+  isStartingConversation?: boolean
+}) {
   const {
     attributes,
     listeners,
@@ -202,7 +231,12 @@ function SortableLeadItem({ lead }: { lead: Lead }) {
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <LeadCard lead={lead} isDragging={isDragging} />
+      <LeadCard 
+        lead={lead} 
+        isDragging={isDragging} 
+        onStartConversation={onStartConversation}
+        isStartingConversation={isStartingConversation}
+      />
     </div>
   )
 }
@@ -212,10 +246,14 @@ function StageColumn({
   stage,
   leads,
   funnelId,
+  onStartConversation,
+  startingConversationId,
 }: {
   stage: Stage
   leads: Lead[]
   funnelId: string
+  onStartConversation?: (leadId: string) => void
+  startingConversationId?: string | null
 }) {
   const totalValue = leads.reduce((sum, lead) => sum + (lead.value || 0), 0)
 
@@ -251,7 +289,12 @@ function StageColumn({
         >
           <div className="space-y-2 min-h-[100px]">
             {leads.map((lead) => (
-              <SortableLeadItem key={lead.id} lead={lead} />
+              <SortableLeadItem 
+                key={lead.id} 
+                lead={lead}
+                onStartConversation={onStartConversation}
+                isStartingConversation={startingConversationId === lead.id}
+              />
             ))}
           </div>
         </SortableContext>
@@ -261,11 +304,13 @@ function StageColumn({
 }
 
 export default function LeadsPage() {
+  const router = useRouter()
   const queryClient = useQueryClient()
   const [selectedFunnelId, setSelectedFunnelId] = useState<string | null>(null)
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [startingConversationId, setStartingConversationId] = useState<string | null>(null)
   const [newLead, setNewLead] = useState({
     name: '',
     phone: '',
@@ -371,6 +416,36 @@ export default function LeadsPage() {
     },
   })
 
+  // Start conversation mutation
+  const startConversationMutation = useMutation({
+    mutationFn: async (leadId: string) => {
+      const res = await axios.post('/api/conversations', { leadId })
+      return res.data
+    },
+    onSuccess: (data) => {
+      const conversationId = data.conversation?.id
+      toast.success('Conversación iniciada')
+      // Navegar al inbox con la conversación seleccionada
+      if (conversationId) {
+        router.push(`/inbox?conversationId=${conversationId}`)
+      } else {
+        router.push('/inbox')
+      }
+    },
+    onError: (err: any) => {
+      toast.error('Error al iniciar conversación', {
+        description: err.response?.data?.error,
+      })
+      setStartingConversationId(null)
+    },
+  })
+
+  // Handle start conversation
+  const handleStartConversation = (leadId: string) => {
+    setStartingConversationId(leadId)
+    startConversationMutation.mutate(leadId)
+  }
+
   // Get leads by stage
   const getLeadsByStage = (stageId: string) => {
     return leads
@@ -442,8 +517,12 @@ export default function LeadsPage() {
       newLead.stageId = selectedFunnel.stages[0].id
     }
     addMutation.mutate({
-      ...newLead,
+      name: newLead.name,
+      phoneNumber: newLead.phone, // El backend espera 'phoneNumber'
+      email: newLead.email || undefined,
+      source: newLead.source || undefined,
       funnelId: selectedFunnelId,
+      stageId: newLead.stageId,
       value: newLead.value ? parseFloat(newLead.value) : null,
     })
   }
@@ -652,6 +731,8 @@ export default function LeadsPage() {
                       stage={stage}
                       leads={getLeadsByStage(stage.id)}
                       funnelId={selectedFunnelId!}
+                      onStartConversation={handleStartConversation}
+                      startingConversationId={startingConversationId}
                     />
                   ))}
               </div>

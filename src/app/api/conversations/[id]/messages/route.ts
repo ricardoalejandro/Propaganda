@@ -93,11 +93,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // Actualizar última actividad
+    // Actualizar última actividad y último mensaje
     await prisma.conversation.update({
       where: { id },
       data: {
         lastMessageAt: new Date(),
+        lastMessage: content || caption || '[Media]',
       },
     })
 

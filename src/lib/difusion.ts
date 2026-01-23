@@ -6,6 +6,8 @@
  * - POST con JSON body para /send/* endpoints
  */
 
+import { apiLogger } from './logger'
+
 const DIFUSION_URL = process.env.DIFUSION_URL || 'https://difusion.naperu.cloud'
 const DIFUSION_USER = process.env.DIFUSION_USER || 'admin'
 const DIFUSION_PASSWORD = process.env.DIFUSION_PASSWORD || ''
@@ -25,43 +27,120 @@ async function difusionGet<T>(endpoint: string, params?: Record<string, string>)
     })
   }
   
-  const response = await fetch(url.toString(), {
+  const requestUrl = url.toString()
+  
+  await apiLogger.debug('difusion_request', `Iniciando request a difusion`, {
     method: 'GET',
-    headers: {
-      'Authorization': getAuthHeader(),
-    },
+    endpoint,
+    params,
+    url: requestUrl,
+    difusionUrl: DIFUSION_URL,
   })
 
-  // La API devuelve 400 para ALREADY_LOGGED_IN, pero queremos manejarlo como éxito
-  const data = await response.json()
+  const startTime = Date.now()
   
-  // Solo lanzar error si no es un caso conocido de "error esperado"
-  if (!response.ok && data?.code !== 'ALREADY_LOGGED_IN') {
-    throw new Error(`Difusion API Error: ${response.status} - ${JSON.stringify(data)}`)
-  }
+  try {
+    const response = await fetch(requestUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': getAuthHeader(),
+      },
+    })
 
-  return data as T
+    const responseTime = Date.now() - startTime
+    
+    // La API devuelve 400 para ALREADY_LOGGED_IN, pero queremos manejarlo como éxito
+    const data = await response.json()
+    
+    await apiLogger.info('difusion_response', `Respuesta de difusion`, {
+      endpoint,
+      status: response.status,
+      statusText: response.statusText,
+      responseTime: `${responseTime}ms`,
+      responseCode: data?.code,
+      responseMessage: data?.message,
+      hasResults: !!data?.results,
+    })
+    
+    // Solo lanzar error si no es un caso conocido de "error esperado"
+    if (!response.ok && data?.code !== 'ALREADY_LOGGED_IN') {
+      const errorMsg = `Difusion API Error: ${response.status} - ${JSON.stringify(data)}`
+      await apiLogger.error('difusion_error', `Error en respuesta de difusion`, new Error(errorMsg), {
+        endpoint,
+        status: response.status,
+        data,
+      })
+      throw new Error(errorMsg)
+    }
+
+    return data as T
+  } catch (error) {
+    const responseTime = Date.now() - startTime
+    await apiLogger.error('difusion_fetch_error', `Error de conexión a difusion`, error as Error, {
+      endpoint,
+      url: requestUrl,
+      responseTime: `${responseTime}ms`,
+    })
+    throw error
+  }
 }
 
 // Helper para hacer requests POST
 async function difusionPost<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
   const url = `${DIFUSION_URL}${endpoint}`
   
-  const response = await fetch(url, {
+  await apiLogger.debug('difusion_post_request', `Iniciando POST a difusion`, {
     method: 'POST',
-    headers: {
-      'Authorization': getAuthHeader(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
+    endpoint,
+    url,
+    body,
   })
 
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Difusion API Error: ${response.status} - ${error}`)
-  }
+  const startTime = Date.now()
 
-  return response.json()
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': getAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+
+    const responseTime = Date.now() - startTime
+
+    if (!response.ok) {
+      const error = await response.text()
+      const errorMsg = `Difusion API Error: ${response.status} - ${error}`
+      await apiLogger.error('difusion_post_error', `Error en POST a difusion`, new Error(errorMsg), {
+        endpoint,
+        status: response.status,
+        error,
+        responseTime: `${responseTime}ms`,
+      })
+      throw new Error(errorMsg)
+    }
+
+    const data = await response.json()
+    
+    await apiLogger.info('difusion_post_response', `Respuesta POST de difusion`, {
+      endpoint,
+      status: response.status,
+      responseTime: `${responseTime}ms`,
+      responseCode: data?.code,
+    })
+
+    return data
+  } catch (error) {
+    const responseTime = Date.now() - startTime
+    await apiLogger.error('difusion_post_fetch_error', `Error de conexión POST a difusion`, error as Error, {
+      endpoint,
+      url,
+      responseTime: `${responseTime}ms`,
+    })
+    throw error
+  }
 }
 
 // ============================================

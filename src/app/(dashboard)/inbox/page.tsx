@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { Header } from '@/components/layout'
@@ -298,15 +299,37 @@ function LeadPanel({
 }
 
 export default function InboxPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+      </div>
+    }>
+      <InboxContent />
+    </Suspense>
+  )
+}
+
+function InboxContent() {
   const queryClient = useQueryClient()
+  const searchParams = useSearchParams()
+  const urlConversationId = searchParams.get('conversationId')
+  
   const [selectedConversationId, setSelectedConversationId] = useState<
     string | null
-  >(null)
+  >(urlConversationId)
   const [messageInput, setMessageInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [accountFilter, setAccountFilter] = useState<string>('all')
   const [showLeadPanel, setShowLeadPanel] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Seleccionar conversación de URL si viene como parámetro
+  useEffect(() => {
+    if (urlConversationId && urlConversationId !== selectedConversationId) {
+      setSelectedConversationId(urlConversationId)
+    }
+  }, [urlConversationId])
 
   // Fetch conversations
   const { data: conversationsData, isLoading: conversationsLoading } = useQuery({

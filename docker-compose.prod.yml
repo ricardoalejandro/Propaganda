@@ -1,0 +1,81 @@
+services:
+  app:
+    container_name: propaganda_app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    expose:
+      - "5000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-propaganda_user}:${POSTGRES_PASSWORD}@propaganda_db:5432/${POSTGRES_DB:-propaganda}?schema=public
+      - REDIS_URL=redis://propaganda_redis:6379
+      - DIFUSION_URL=${DIFUSION_URL:-https://difusion.naperu.cloud}
+      - DIFUSION_USER=${DIFUSION_USER:-admin}
+      - DIFUSION_PASSWORD=${DIFUSION_PASSWORD}
+      - NODE_ENV=production
+    depends_on:
+      propaganda_db:
+        condition: service_healthy
+      propaganda_redis:
+        condition: service_healthy
+    networks:
+      - dokploy-network
+      - propaganda_internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.propaganda.rule=Host(\`propaganda.naperu.cloud\`)"
+      - "traefik.http.routers.propaganda.entrypoints=websecure"
+      - "traefik.http.routers.propaganda.tls=true"
+      - "traefik.http.routers.propaganda.tls.certresolver=letsencrypt"
+      - "traefik.http.services.propaganda.loadbalancer.server.port=5000"
+      - "traefik.http.middlewares.propaganda-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.propaganda-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.propaganda-headers.headers.stsPreload=true"
+      - "traefik.http.middlewares.propaganda-headers.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.propaganda-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.propaganda-headers.headers.browserXssFilter=true"
+      - "traefik.http.routers.propaganda.middlewares=propaganda-headers"
+
+  propaganda_db:
+    container_name: propaganda_db
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-propaganda_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-propaganda}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - propaganda_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-propaganda_user} -d ${POSTGRES_DB:-propaganda}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  propaganda_redis:
+    container_name: propaganda_redis
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - propaganda_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  propaganda_internal:
+    driver: bridge
+  dokploy-network:
+    external: true
+
+volumes:
+  postgres_data:
+  redis_data:

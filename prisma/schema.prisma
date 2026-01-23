@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -7,69 +8,240 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Contact {
-  id          String    @id @default(uuid())
-  phoneNumber String    @unique
-  name        String?
-  profilePic  String?
-  status      String    @default("NEW") // NEW, CONTACTED, QUALIFIED, PROPOSAL, CLOSED
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+// ============================================
+// MÓDULO: CONEXIONES WHATSAPP
+// ============================================
 
+model WhatsAppAccount {
+  id          String        @id @default(uuid())
+  deviceId    String        @unique // ID del dispositivo en difusion.naperu.cloud
+  phoneNumber String?       // Se obtiene después de conectar
+  displayName String?       // Nombre mostrado en WA
+  status      AccountStatus @default(DISCONNECTED)
+
+  // Metadatos personalizados
+  filial    String? // Sucursal/filial
+  encargado String? // Persona responsable
+
+  // Timestamps
+  connectedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relaciones
   conversations Conversation[]
-  observations  Observation[]
   leads         Lead[]
 
+  @@index([status])
   @@index([phoneNumber])
 }
 
-model Conversation {
-  id           String    @id @default(uuid())
-  phoneNumber  String
-  name         String?
-  isGroup      Boolean   @default(false)
-  lastMessageAt DateTime @default(now())
-  unreadCount  Int       @default(0)
-  
-  contact      Contact   @relation(fields: [phoneNumber], references: [phoneNumber])
-  messages     Message[]
+enum AccountStatus {
+  CONNECTED
+  DISCONNECTED
+  SCANNING
+  ERROR
+}
 
+// ============================================
+// MÓDULO: EMBUDOS (FUNNELS)
+// ============================================
+
+model Funnel {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  color       String  @default("#6366f1") // Color del embudo
+  isDefault   Boolean @default(false) // Embudo principal "Leads"
+  position    Int     @default(0) // Orden de los embudos
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  stages FunnelStage[]
+  leads  Lead[]
+
+  @@index([isDefault])
+}
+
+model FunnelStage {
+  id       String  @id @default(uuid())
+  funnelId String
+  name     String
+  color    String  @default("#94a3b8")
+  position Int     @default(0) // Orden dentro del embudo
+  isWon    Boolean @default(false) // Etapa de "ganado"
+  isLost   Boolean @default(false) // Etapa de "perdido"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  funnel Funnel @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+  leads  Lead[]
+
+  @@index([funnelId])
+  @@index([position])
+}
+
+// ============================================
+// MÓDULO: LEADS / CONTACTOS
+// ============================================
+
+model Lead {
+  id String @id @default(uuid())
+
+  // Información del contacto
+  phoneNumber String  // Número de WhatsApp
+  name        String?
+  profilePic  String?
+
+  // Ubicación en embudo
+  funnelId String
+  stageId  String
+  position Int    @default(0) // Posición dentro de la etapa
+
+  // Datos de negocio
+  value    Float?
+  currency String @default("PEN")
+
+  // Origen
+  sourceAccountId String // Cuenta WA de donde llegó
+
+  // Timestamps
+  lastContactAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  funnel        Funnel          @relation(fields: [funnelId], references: [id])
+  stage         FunnelStage     @relation(fields: [stageId], references: [id])
+  sourceAccount WhatsAppAccount @relation(fields: [sourceAccountId], references: [id])
+  conversations Conversation[]
+  notes         LeadNote[]
+  tags          LeadTag[]
+
+  @@unique([phoneNumber, funnelId]) // Un lead único por número+embudo
+  @@index([funnelId])
+  @@index([stageId])
   @@index([phoneNumber])
+  @@index([lastContactAt])
+}
+
+model LeadNote {
+  id        String   @id @default(uuid())
+  leadId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+}
+
+model Tag {
+  id    String @id @default(uuid())
+  name  String @unique
+  color String @default("#6366f1")
+
+  leads LeadTag[]
+}
+
+model LeadTag {
+  leadId String
+  tagId  String
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([leadId, tagId])
+}
+
+// ============================================
+// MÓDULO: CONVERSACIONES / MENSAJES
+// ============================================
+
+model Conversation {
+  id String @id @default(uuid())
+
+  // Identificadores
+  accountId String // Cuenta WA que maneja esta conversación
+  chatJid   String // JID del chat en WhatsApp
+
+  // Info del contacto (extraída del JID y metadata)
+  contactPhone String? // Número de teléfono formateado
+  contactName  String? // Nombre del contacto
+
+  // Info del chat
+  isGroup Boolean @default(false)
+
+  // Último mensaje para preview
+  lastMessage   String?
+  lastMessageAt DateTime @default(now())
+
+  // Contadores
+  unreadCount Int @default(0)
+
+  // Relaciones
+  account  WhatsAppAccount @relation(fields: [accountId], references: [id])
+  lead     Lead?           @relation(fields: [leadId], references: [id])
+  leadId   String?
+  messages Message[]
+
+  @@unique([accountId, chatJid])
+  @@index([accountId])
   @@index([lastMessageAt])
+  @@index([leadId])
 }
 
 model Message {
-  id             String       @id
+  id             String @id // ID del mensaje de WhatsApp
   conversationId String
-  body           String
-  fromMe         Boolean
-  type           String       @default("chat")
-  timestamp      DateTime     @default(now())
-  hasMedia       Boolean      @default(false)
-  
-  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  // Contenido
+  body    String
+  content String? // Alias/preview del contenido
+  type    String  @default("text") // text, image, video, audio, document, sticker
+
+  // Metadata
+  fromMe     Boolean
+  senderJid  String? // Quién envió (para grupos)
+  senderName String?
+  status     String? // sent, delivered, read
+
+  // Media
+  hasMedia  Boolean @default(false)
+  mediaUrl  String?
+  mediaType String?
+  fileName  String?
+
+  // Timestamps
+  timestamp DateTime
+  createdAt DateTime @default(now())
+
+  // Relaciones
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
   @@index([timestamp])
 }
 
-model Observation {
-  id        String   @id @default(uuid())
-  contactId String
-  content   String
-  createdAt DateTime @default(now())
-  
-  contact   Contact  @relation(fields: [contactId], references: [id])
-}
+// ============================================
+// CONFIGURACIÓN
+// ============================================
 
-model Lead {
-  id          String   @id @default(uuid())
-  contactId   String
-  stage       String   @default("NEW") // Stages logic
-  value       Float?
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  contact     Contact  @relation(fields: [contactId], references: [id])
+model Settings {
+  id String @id @default("default")
+
+  // Configuración de difusion
+  difusionUrl      String  @default("https://difusion.naperu.cloud")
+  difusionUser     String?
+  difusionPassword String?
+
+  // Configuración general
+  companyName     String @default("Mi Empresa")
+  defaultCurrency String @default("PEN")
+
+  updatedAt DateTime @updatedAt
 }

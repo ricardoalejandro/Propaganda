@@ -8,29 +8,37 @@ services:
       dockerfile: Dockerfile
     restart: always
     ports:
-      - "3000:3000"
+      - "5000:5000"
     environment:
-      - DATABASE_URL=postgresql://admin:admin123@postgres:5432/propaganda?schema=public
+      - DATABASE_URL=postgresql://propaganda_user:propaganda_secure_pass_2024@postgres:5432/propaganda
       - REDIS_URL=redis://redis:6379
+      - DIFUSION_URL=https://difusion.naperu.cloud
+      - DIFUSION_USER=admin
+      - DIFUSION_PASSWORD=qjwesqy2lv8whlryl6mvpkos6kvottv1
       - NODE_ENV=production
     depends_on:
-      - postgres
-      - redis
-    volumes:
-      - ./.wwebjs_auth:/app/.wwebjs_auth
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   postgres:
     image: postgres:15-alpine
     container_name: propaganda_db
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
-      POSTGRES_DB: ${POSTGRES_DB:-propaganda}
+      POSTGRES_USER: propaganda_user
+      POSTGRES_PASSWORD: propaganda_secure_pass_2024
+      POSTGRES_DB: propaganda
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U propaganda_user -d propaganda"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine

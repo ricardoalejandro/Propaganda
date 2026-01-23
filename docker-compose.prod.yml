@@ -24,7 +24,7 @@ services:
       - propaganda_internal
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.propaganda.rule=Host(\`propaganda.naperu.cloud\`)"
+      - "traefik.http.routers.propaganda.rule=Host(`propaganda.naperu.cloud`)"
       - "traefik.http.routers.propaganda.entrypoints=websecure"
       - "traefik.http.routers.propaganda.tls=true"
       - "traefik.http.routers.propaganda.tls.certresolver=letsencrypt"

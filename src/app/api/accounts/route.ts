@@ -5,34 +5,35 @@ import * as difusion from '@/lib/difusion'
 // GET /api/accounts - Listar todas las cuentas
 export async function GET() {
   try {
-    // Obtener dispositivos conectados de difusion
-    const difusionDevices = await difusion.listDevices()
-    
     // Obtener cuentas de nuestra BD
     const accounts = await prisma.whatsAppAccount.findMany({
       orderBy: { createdAt: 'desc' },
     })
 
-    // Actualizar estados basados en dispositivos de difusion
+    // Actualizar estados verificando cada dispositivo en difusion
     const updatedAccounts = await Promise.all(
       accounts.map(async (account) => {
-        // Buscar si el device está conectado en difusion
-        const isConnected = difusionDevices.some(
-          d => d.device === account.deviceId || d.name === account.deviceId
-        )
-        
-        const newStatus = isConnected ? 'CONNECTED' : 'DISCONNECTED'
-        
-        if (account.status !== newStatus && account.status !== 'SCANNING') {
-          return prisma.whatsAppAccount.update({
-            where: { id: account.id },
-            data: {
-              status: newStatus,
-              connectedAt: newStatus === 'CONNECTED' ? new Date() : account.connectedAt,
-            },
-          })
+        try {
+          // Verificar estado específico del dispositivo
+          const status = await difusion.getDeviceStatus(account.deviceId)
+          const isConnected = status.is_logged_in
+          
+          const newStatus = isConnected ? 'CONNECTED' : 'DISCONNECTED'
+          
+          if (account.status !== newStatus && account.status !== 'SCANNING') {
+            return prisma.whatsAppAccount.update({
+              where: { id: account.id },
+              data: {
+                status: newStatus,
+                connectedAt: newStatus === 'CONNECTED' ? new Date() : account.connectedAt,
+              },
+            })
+          }
+          return account
+        } catch {
+          // Si falla la verificación, devolver la cuenta sin cambios
+          return account
         }
-        return account
       })
     )
 

@@ -32,12 +32,15 @@ async function difusionGet<T>(endpoint: string, params?: Record<string, string>)
     },
   })
 
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Difusion API Error: ${response.status} - ${error}`)
+  // La API devuelve 400 para ALREADY_LOGGED_IN, pero queremos manejarlo como éxito
+  const data = await response.json()
+  
+  // Solo lanzar error si no es un caso conocido de "error esperado"
+  if (!response.ok && data?.code !== 'ALREADY_LOGGED_IN') {
+    throw new Error(`Difusion API Error: ${response.status} - ${JSON.stringify(data)}`)
   }
 
-  return response.json()
+  return data as T
 }
 
 // Helper para hacer requests POST
@@ -77,8 +80,16 @@ export interface DifusionResponse<T = unknown> {
 }
 
 export interface DifusionQRResult {
-  qr_link: string
-  qr_duration: number
+  qr_link?: string
+  qr_duration?: number
+  code: string // SUCCESS o ALREADY_LOGGED_IN
+  message: string
+}
+
+export interface DeviceStatusResult {
+  device_id: string
+  is_connected: boolean
+  is_logged_in: boolean
 }
 
 export interface SendMessageResult {
@@ -89,6 +100,15 @@ export interface SendMessageResult {
 // ============================================
 // DISPOSITIVOS / APP
 // ============================================
+
+/**
+ * Verificar estado de conexión de un dispositivo
+ * GET /app/status?phone={phone}
+ */
+export async function getDeviceStatus(phone: string): Promise<DeviceStatusResult> {
+  const response = await difusionGet<DifusionResponse<DeviceStatusResult>>('/app/status', { phone })
+  return response.results || { device_id: '', is_connected: false, is_logged_in: false }
+}
 
 /**
  * Listar todos los dispositivos conectados
@@ -104,13 +124,18 @@ export async function listDevices(): Promise<DifusionDevice[]> {
  * GET /app/login?phone={phone}
  * 
  * El "phone" actúa como device_id único
+ * Puede devolver:
+ * - code: SUCCESS con qr_link y qr_duration
+ * - code: ALREADY_LOGGED_IN si ya está conectado
  */
 export async function loginDevice(phone: string): Promise<DifusionQRResult> {
   const response = await difusionGet<DifusionResponse<DifusionQRResult>>('/app/login', { phone })
-  if (!response.results) {
-    throw new Error('No QR returned from API')
+  return {
+    code: response.code,
+    message: response.message,
+    qr_link: response.results?.qr_link,
+    qr_duration: response.results?.qr_duration,
   }
-  return response.results
 }
 
 /**

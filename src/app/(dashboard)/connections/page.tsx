@@ -106,15 +106,17 @@ export default function ConnectionsPage() {
   })
 
   // Fetch QR Code
+  const [qrTimestamp, setQrTimestamp] = useState(0)
   const { data: qrData, isLoading: qrLoading, refetch: refetchQr } = useQuery({
-    queryKey: ['account-qr', selectedAccount?.id],
+    queryKey: ['account-qr', selectedAccount?.id, qrTimestamp],
     queryFn: async () => {
       if (!selectedAccount) return null
       const res = await axios.get(`/api/accounts/${selectedAccount.id}/qr`)
       return res.data
     },
     enabled: !!selectedAccount && isQrOpen,
-    refetchInterval: isQrOpen ? 5000 : false, // Refresh QR every 5s
+    staleTime: 0, // Siempre considerar stale para forzar refetch
+    gcTime: 0, // No cachear el QR
   })
 
   // Add account mutation
@@ -502,16 +504,29 @@ export default function ConnectionsPage() {
             ) : qrData?.qrLink ? (
               <div className="flex flex-col items-center gap-4">
                 <div className="p-4 bg-white rounded-lg border">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={qrData.qrLink}
+                    key={qrData.timestamp || qrTimestamp}
+                    src={`${qrData.qrLink}?t=${qrData.timestamp || Date.now()}`}
                     alt="QR Code"
-                    className="w-64 h-64"
+                    className="w-64 h-64 object-contain"
+                    onError={(e) => {
+                      // Si la imagen falla, mostrar placeholder
+                      const target = e.target as HTMLImageElement
+                      target.style.opacity = '0.3'
+                    }}
                   />
                 </div>
                 <p className="text-sm text-slate-500">
                   El QR expira en {qrData.duration || 30} segundos
                 </p>
-                <Button variant="outline" size="sm" onClick={() => refetchQr()}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    setQrTimestamp(Date.now())
+                  }}
+                >
                   <RefreshCw className="w-4 h-4 mr-2" />
                   Actualizar QR
                 </Button>

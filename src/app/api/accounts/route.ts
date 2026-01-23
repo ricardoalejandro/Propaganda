@@ -74,6 +74,12 @@ export async function POST(request: NextRequest) {
     // Obtener QR de difusion (esto "crea" el device)
     const qrResult = await difusion.loginDevice(deviceId)
 
+    // Convertir HTTP a HTTPS para evitar contenido mixto
+    let qrLink = qrResult.qr_link || ''
+    if (qrLink.startsWith('http://')) {
+      qrLink = qrLink.replace('http://', 'https://')
+    }
+
     // Guardar en nuestra BD
     const account = await prisma.whatsAppAccount.create({
       data: {
@@ -88,7 +94,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ 
       account,
       qr: {
-        url: qrResult.qr_link,
+        url: qrLink,
         duration: qrResult.qr_duration,
       }
     }, { status: 201 })

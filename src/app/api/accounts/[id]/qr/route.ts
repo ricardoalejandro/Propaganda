@@ -31,9 +31,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Obtener QR de difusion usando loginDevice
     const qrResult = await difusion.loginDevice(account.deviceId)
 
+    // Convertir HTTP a HTTPS para evitar contenido mixto
+    let qrLink = qrResult.qr_link || ''
+    if (qrLink.startsWith('http://')) {
+      qrLink = qrLink.replace('http://', 'https://')
+    }
+
     return NextResponse.json({
-      qrLink: qrResult.qr_link,
+      qrLink,
       duration: qrResult.qr_duration,
+      timestamp: Date.now(), // Para forzar actualización en el cliente
     })
   } catch (error) {
     console.error('Error getting QR:', error)

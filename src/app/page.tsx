@@ -1,12 +1,16 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { QRLogin } from "@/components/chat/QRLogin"
 import { ChatApp } from "@/components/chat/ChatApp"
 import { Loader2 } from "lucide-react"
 
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null)
+
+  const handleLoginSuccess = useCallback(() => {
+    setIsLoggedIn(true)
+  }, [])
 
   useEffect(() => {
     const checkStatus = async () => {
@@ -37,7 +41,7 @@ export default function Home() {
 
   // Not logged in - show QR
   if (!isLoggedIn) {
-    return <QRLogin onLoginSuccess={() => setIsLoggedIn(true)} />
+    return <QRLogin onLoginSuccess={handleLoginSuccess} />
   }
 
   // Logged in - show chat

@@ -1,9 +1,8 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { Loader2, QrCode, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import Image from "next/image"
 
 interface QRLoginProps {
   onLoginSuccess: () => void
@@ -14,15 +13,20 @@ export function QRLogin({ onLoginSuccess }: QRLoginProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [countdown, setCountdown] = useState(0)
+  const fetchingRef = useRef(false)
 
   const fetchQR = useCallback(async () => {
+    if (fetchingRef.current) return
+    fetchingRef.current = true
+
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch("/api/login")
+      const response = await fetch("/api/login", { cache: 'no-store' })
       const data = await response.json()
       
       if (data.code === "SUCCESS" && data.results) {
+        // qr_link now contains base64 data URL directly
         setQrUrl(data.results.qr_link)
         setCountdown(data.results.qr_duration || 60)
       } else if (data.message?.includes("already logged")) {
@@ -35,6 +39,7 @@ export function QRLogin({ onLoginSuccess }: QRLoginProps) {
       setError("Error de conexión")
     } finally {
       setLoading(false)
+      fetchingRef.current = false
     }
   }, [onLoginSuccess])
 
@@ -105,13 +110,13 @@ export function QRLogin({ onLoginSuccess }: QRLoginProps) {
             </div>
           ) : qrUrl ? (
             <div className="flex flex-col items-center gap-3">
-              <Image 
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img 
                 src={qrUrl} 
                 alt="QR Code" 
                 width={256}
                 height={256}
                 className="object-contain"
-                unoptimized
               />
               {countdown > 0 && (
                 <span className="text-sm text-gray-500">

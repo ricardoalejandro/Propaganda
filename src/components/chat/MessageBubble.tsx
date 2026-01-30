@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { format } from "date-fns"
 import { CheckCheck, FileText, Play, Mic, User, AlertCircle } from "lucide-react"
 import { formatMessage } from "@/lib/formatWhatsAppText"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 
 interface MessageBubbleProps {
   message: Message
@@ -18,16 +18,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const [showLightbox, setShowLightbox] = useState(false)
   const [localUrl, setLocalUrl] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState(false)
+  const [mediaExpired, setMediaExpired] = useState(false)
+  const downloadAttempted = useRef(false)
 
   // Download media to local storage when component mounts
   useEffect(() => {
     if (!message.media_type || !message.url) return
-    
+
     // Check if URL is already local
     if (message.url.startsWith('/api/media/')) {
       setLocalUrl(message.url)
       return
     }
+
+    // Only attempt download once per message
+    if (downloadAttempted.current) return
+    downloadAttempted.current = true
 
     // Try to download and cache the media
     const downloadMedia = async () => {
@@ -41,17 +47,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             filename: message.filename
           })
         })
-        
+
         const data = await response.json()
+
         if (data.code === 'SUCCESS' && data.results?.localPath) {
           setLocalUrl(data.results.localPath)
+        } else if (data.code === 'EXPIRED' || data.results?.expired) {
+          // URL has expired, mark as unavailable
+          setMediaExpired(true)
+          setDownloadError(true)
         } else {
-          // Download failed, use original URL
+          // Other error, try using original URL (might work for new messages)
           setLocalUrl(message.url)
         }
-      } catch (err) {
-        console.error('Error downloading media:', err)
-        setLocalUrl(message.url) // Fallback to original URL
+      } catch {
+        // Network error, try original URL
+        setLocalUrl(message.url)
       }
     }
 
@@ -87,7 +98,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               {downloadError ? (
                 <div className="w-48 h-32 bg-gray-200 rounded flex flex-col items-center justify-center text-gray-400">
                   <AlertCircle className="w-8 h-8 mb-1" />
-                  <span className="text-xs">Imagen no disponible</span>
+                  <span className="text-xs">{mediaExpired ? "Imagen expirada" : "Imagen no disponible"}</span>
                 </div>
               ) : (
                 <img

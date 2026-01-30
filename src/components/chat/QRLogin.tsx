@@ -24,7 +24,7 @@ export function QRLogin({ onLoginSuccess }: QRLoginProps) {
     try {
       const response = await fetch("/api/login", { cache: 'no-store' })
       const data = await response.json()
-      
+
       if (data.code === "SUCCESS" && data.results) {
         // qr_link now contains base64 data URL directly
         setQrUrl(data.results.qr_link)
@@ -64,7 +64,7 @@ export function QRLogin({ onLoginSuccess }: QRLoginProps) {
   // Countdown timer
   useEffect(() => {
     if (countdown <= 0) return
-    
+
     const timer = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
@@ -80,8 +80,24 @@ export function QRLogin({ onLoginSuccess }: QRLoginProps) {
 
   // Initial fetch
   useEffect(() => {
-    fetchQR()
-  }, [fetchQR])
+    const init = async () => {
+      // Check status first to avoid resetting session if already logged in
+      try {
+        const response = await fetch("/api/status")
+        const data = await response.json()
+        if (data.results?.is_logged_in) {
+          onLoginSuccess()
+          return
+        }
+      } catch (err) {
+        console.error(err)
+      }
+
+      // Only fetch QR if not logged in
+      fetchQR()
+    }
+    init()
+  }, [fetchQR, onLoginSuccess])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center p-4">
@@ -111,9 +127,9 @@ export function QRLogin({ onLoginSuccess }: QRLoginProps) {
           ) : qrUrl ? (
             <div className="flex flex-col items-center gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img 
-                src={qrUrl} 
-                alt="QR Code" 
+              <img
+                src={qrUrl}
+                alt="QR Code"
                 width={256}
                 height={256}
                 className="object-contain"
@@ -144,9 +160,9 @@ export function QRLogin({ onLoginSuccess }: QRLoginProps) {
           </ol>
         </div>
 
-        <Button 
-          onClick={fetchQR} 
-          variant="ghost" 
+        <Button
+          onClick={fetchQR}
+          variant="ghost"
           className="w-full mt-4"
           disabled={loading}
         >

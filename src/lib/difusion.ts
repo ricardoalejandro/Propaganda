@@ -1,8 +1,15 @@
 import axios from 'axios'
+import { CookieJar } from 'tough-cookie'
+import { promisify } from 'util'
 
 const DIFUSION_URL = process.env.NEXT_PUBLIC_DIFUSION_URL || 'https://difusion.naperu.cloud'
 const DIFUSION_USER = process.env.DIFUSION_USER || 'admin'
 const DIFUSION_PASS = process.env.DIFUSION_PASS || 'c2rfoitp1ennzsfsdfsdlkl79mg3rstydwels'
+
+// Cookie Jar for session persistence
+const cookieJar = new CookieJar()
+const getCookieString = promisify(cookieJar.getCookieString.bind(cookieJar))
+const setCookie = promisify(cookieJar.setCookie.bind(cookieJar))
 
 // Cliente para uso en el servidor (con credenciales)
 export const difusionServer = axios.create({
@@ -15,6 +22,60 @@ export const difusionServer = axios.create({
     'Content-Type': 'application/json',
   },
 })
+
+// Debug and Cookie interceptors
+difusionServer.interceptors.request.use(async request => {
+  // Inject cookies
+  const url = request.url ? new URL(request.url, DIFUSION_URL).toString() : DIFUSION_URL
+  try {
+    const cookieHeader = await getCookieString(url)
+    if (cookieHeader) {
+      request.headers.set('Cookie', cookieHeader)
+    }
+  } catch (err) {
+    console.error('Error getting cookies:', err)
+  }
+
+  console.log(`[Difusion Request] ${request.method?.toUpperCase()} ${request.url}`)
+  return request
+})
+
+difusionServer.interceptors.response.use(
+  async response => {
+    // Only log body for status or relevant endpoints to avoid noise
+    if (response.config.url?.includes('/app/status') || response.config.url?.includes('/login')) {
+      console.log(`[Difusion Response Body] ${JSON.stringify(response.data)}`)
+    }
+
+    console.log(`[Difusion Response] ${response.status} ${response.config.url}`)
+
+    // Store cookies
+    const setCookieHeader = response.headers['set-cookie']
+    if (setCookieHeader) {
+      console.log('[Difusion Cookie] Received Set-Cookie:', setCookieHeader)
+      const url = response.config.url ? new URL(response.config.url, DIFUSION_URL).toString() : DIFUSION_URL
+
+      const cookies = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader]
+
+      for (const cookie of cookies) {
+        if (typeof cookie === 'string') {
+          try {
+            await setCookie(cookie, url)
+          } catch (err) {
+            console.error('Error setting cookie:', err)
+          }
+        }
+      }
+    }
+    return response
+  },
+  error => {
+    if (error.response) {
+      console.error(`[Difusion Error] ${error.response.status} ${error.config.url}`)
+    }
+    return Promise.reject(error)
+  }
+)
 
 // Tipos
 export interface DifusionResponse<T> {

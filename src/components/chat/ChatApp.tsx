@@ -6,10 +6,10 @@ import { ChatList } from "./ChatList"
 import { ChatWindow } from "./ChatWindow"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { 
-  LogOut, 
-  MessageSquare, 
-  Search, 
+import {
+  LogOut,
+  MessageSquare,
+  Search,
   RefreshCw
 } from "lucide-react"
 
@@ -28,14 +28,23 @@ export function ChatApp({ onLogout }: ChatAppProps) {
 
   const fetchData = useCallback(async () => {
     try {
-      const [chatsRes, contactsRes] = await Promise.all([
-        fetch("/api/chats"),
-        fetch("/api/contacts"),
-      ])
-      
+      // Fetch sequentially to avoid backend race conditions
+      const chatsRes = await fetch("/api/chats")
+      if (chatsRes.status === 401) {
+        handleLogout() // Auto logout on 401
+        return
+      }
       const chatsData = await chatsRes.json()
+
+      const contactsRes = await fetch("/api/contacts")
+      if (contactsRes.status === 401) {
+        // If contacts fail but chats worked, maybe just warn? 
+        // But usually 401 means global session loss.
+        handleLogout()
+        return
+      }
       const contactsData = await contactsRes.json()
-      
+
       if (chatsData.results?.data) {
         setChats(chatsData.results.data)
       }
@@ -55,11 +64,31 @@ export function ChatApp({ onLogout }: ChatAppProps) {
     return () => clearInterval(interval)
   }, [fetchData])
 
+  // Periodically check connection status and auto-logout if disconnected
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        const response = await fetch("/api/status")
+        const data = await response.json()
+        if (!data.results?.is_logged_in) {
+          console.log("Session lost, logging out")
+          onLogout()
+        }
+      } catch (err) {
+        console.error("Error checking connection status:", err)
+      }
+    }
+
+    // Check connection every 15 seconds
+    const interval = setInterval(checkConnection, 15000)
+    return () => clearInterval(interval)
+  }, [onLogout])
+
   const handleLogout = async () => {
     if (loggingOut) return
-    
+
     if (!confirm("¿Estás seguro de que quieres cerrar sesión?")) return
-    
+
     setLoggingOut(true)
     try {
       await fetch("/api/logout")
@@ -108,8 +137,8 @@ export function ChatApp({ onLogout }: ChatAppProps) {
               <h1 className="text-lg font-bold">Propaganda</h1>
             </div>
             <div className="flex items-center gap-1">
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 size="icon"
                 onClick={fetchData}
                 className="text-white hover:bg-emerald-700"
@@ -117,8 +146,8 @@ export function ChatApp({ onLogout }: ChatAppProps) {
               >
                 <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
               </Button>
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 size="icon"
                 onClick={handleLogout}
                 disabled={loggingOut}
@@ -168,8 +197,8 @@ export function ChatApp({ onLogout }: ChatAppProps) {
         md:flex flex-1 flex-col
       `}>
         {selectedChat ? (
-          <ChatWindow 
-            chat={selectedChat} 
+          <ChatWindow
+            chat={selectedChat}
             contacts={contacts}
             onBack={handleBack}
           />

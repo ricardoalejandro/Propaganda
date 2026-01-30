@@ -3,9 +3,9 @@
 import { Message } from "@/lib/difusion"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
-import { CheckCheck, FileText, Play, Mic, User } from "lucide-react"
+import { CheckCheck, FileText, Play, Mic, User, AlertCircle } from "lucide-react"
 import { formatMessage } from "@/lib/formatWhatsAppText"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 interface MessageBubbleProps {
   message: Message
@@ -16,6 +16,56 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const time = format(new Date(message.timestamp), "HH:mm")
   const [imageLoaded, setImageLoaded] = useState(false)
   const [showLightbox, setShowLightbox] = useState(false)
+  const [localUrl, setLocalUrl] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState(false)
+
+  // Download media to local storage when component mounts
+  useEffect(() => {
+    if (!message.media_type || !message.url) return
+    
+    // Check if URL is already local
+    if (message.url.startsWith('/api/media/')) {
+      setLocalUrl(message.url)
+      return
+    }
+
+    // Try to download and cache the media
+    const downloadMedia = async () => {
+      try {
+        const response = await fetch('/api/media/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: message.url,
+            messageId: message.id,
+            filename: message.filename
+          })
+        })
+        
+        const data = await response.json()
+        if (data.code === 'SUCCESS' && data.results?.localPath) {
+          setLocalUrl(data.results.localPath)
+        } else {
+          // Download failed, use original URL
+          setLocalUrl(message.url)
+        }
+      } catch (err) {
+        console.error('Error downloading media:', err)
+        setLocalUrl(message.url) // Fallback to original URL
+      }
+    }
+
+    downloadMedia()
+  }, [message.id, message.media_type, message.url, message.filename])
+
+  // Get the URL to use (prefer local, fallback to original)
+  const mediaUrl = localUrl || message.url
+
+  // Handle image error (URL expired)
+  const handleImageError = () => {
+    setImageLoaded(true)
+    setDownloadError(true)
+  }
 
   // Render media content
   const renderMedia = () => {
@@ -27,32 +77,39 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <>
             <div
               className="relative cursor-pointer mb-1 rounded overflow-hidden"
-              onClick={() => setShowLightbox(true)}
+              onClick={() => !downloadError && setShowLightbox(true)}
             >
               {!imageLoaded && (
                 <div className="w-48 h-32 bg-gray-200 animate-pulse rounded flex items-center justify-center">
                   <span className="text-gray-400 text-xs">Cargando...</span>
                 </div>
               )}
-              <img
-                src={message.url}
-                alt={message.filename || "Imagen"}
-                className={cn(
-                  "max-w-[250px] max-h-[300px] rounded object-cover",
-                  !imageLoaded && "hidden"
-                )}
-                onLoad={() => setImageLoaded(true)}
-                onError={() => setImageLoaded(true)}
-              />
+              {downloadError ? (
+                <div className="w-48 h-32 bg-gray-200 rounded flex flex-col items-center justify-center text-gray-400">
+                  <AlertCircle className="w-8 h-8 mb-1" />
+                  <span className="text-xs">Imagen no disponible</span>
+                </div>
+              ) : (
+                <img
+                  src={mediaUrl}
+                  alt={message.filename || "Imagen"}
+                  className={cn(
+                    "max-w-[250px] max-h-[300px] rounded object-cover",
+                    !imageLoaded && "hidden"
+                  )}
+                  onLoad={() => setImageLoaded(true)}
+                  onError={handleImageError}
+                />
+              )}
             </div>
             {/* Lightbox */}
-            {showLightbox && (
+            {showLightbox && !downloadError && (
               <div
                 className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
                 onClick={() => setShowLightbox(false)}
               >
                 <img
-                  src={message.url}
+                  src={mediaUrl}
                   alt={message.filename || "Imagen"}
                   className="max-w-full max-h-full object-contain"
                 />
@@ -65,7 +122,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         return (
           <div className="relative mb-1">
             <video
-              src={message.url}
+              src={mediaUrl}
               controls
               className="max-w-[250px] max-h-[300px] rounded"
               preload="metadata"
@@ -86,7 +143,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       case 'ptt': // Voice note
         return (
           <div className="mb-1">
-            <audio src={message.url} controls className="max-w-[220px]">
+            <audio src={mediaUrl} controls className="max-w-[220px]">
               Tu navegador no soporta audio
             </audio>
             {message.media_type === 'ptt' && (
@@ -104,7 +161,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       case 'document':
         return (
           <a
-            href={message.url}
+            href={mediaUrl}
             target="_blank"
             rel="noopener noreferrer"
             className={cn(
@@ -133,7 +190,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       case 'sticker':
         return (
           <img
-            src={message.url}
+            src={mediaUrl}
             alt="Sticker"
             className="max-w-[150px] max-h-[150px]"
           />

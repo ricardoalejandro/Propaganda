@@ -1,5 +1,6 @@
 import { difusionServer, DifusionResponse } from '@/lib/difusion'
 import { NextRequest, NextResponse } from 'next/server'
+import FormData from 'form-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,25 +31,44 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        let requestBody: Record<string, unknown>
+        let response
 
         if (imageUrl) {
-            // Send via URL
-            requestBody = {
-                phone,
-                image_url: imageUrl,
-                caption: caption || undefined
-            }
+            // Send via URL (JSON body)
+            console.log(`[Send Image] Sending URL to: ${phone}`)
+            response = await difusionServer.post<DifusionResponse<SendImageResponse>>(
+                '/send/image',
+                {
+                    phone,
+                    image_url: imageUrl,
+                    caption: caption || undefined
+                }
+            )
         } else if (image) {
-            // Convert to base64
+            // Send via multipart form-data
             const bytes = await image.arrayBuffer()
-            const base64 = Buffer.from(bytes).toString('base64')
+            const buffer = Buffer.from(bytes)
 
-            requestBody = {
-                phone,
-                image: base64,
-                caption: caption || undefined
+            const difusionFormData = new FormData()
+            difusionFormData.append('phone', phone)
+            difusionFormData.append('image', buffer, {
+                filename: image.name || 'image.jpg',
+                contentType: image.type || 'image/jpeg',
+            })
+            if (caption) {
+                difusionFormData.append('caption', caption)
             }
+
+            console.log(`[Send Image] Sending file to: ${phone}`)
+            response = await difusionServer.post<DifusionResponse<SendImageResponse>>(
+                '/send/image',
+                difusionFormData,
+                {
+                    headers: {
+                        ...difusionFormData.getHeaders(),
+                    },
+                }
+            )
         } else {
             return NextResponse.json(
                 { code: 'ERROR', message: 'No image provided', results: null },
@@ -56,13 +76,7 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        console.log(`[Send Image] Sending to: ${phone}`)
-        const response = await difusionServer.post<DifusionResponse<SendImageResponse>>(
-            '/send/image',
-            requestBody
-        )
         console.log(`[Send Image] Response:`, JSON.stringify(response.data))
-
         return NextResponse.json(response.data)
     } catch (error: unknown) {
         console.error('Error sending image:', error)

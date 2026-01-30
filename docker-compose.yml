@@ -8,6 +8,9 @@ services:
       - NEXT_PUBLIC_DIFUSION_URL=https://difusion.naperu.cloud
       - DIFUSION_USER=admin
       - DIFUSION_PASS=c2rfoitp1ennzsfsdfsdlkl79mg3rstydwels
+      - MEDIA_DIR=/app/uploads/media
+    volumes:
+      - propaganda-media:/app/uploads/media
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.propaganda.rule=Host(`propaganda.naperu.cloud`)"
@@ -16,6 +19,10 @@ services:
       - "traefik.http.services.propaganda.loadbalancer.server.port=3000"
     networks:
       - dokploy-network
+
+volumes:
+  propaganda-media:
+    driver: local
 
 networks:
   dokploy-network:

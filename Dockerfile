@@ -31,6 +31,9 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
+# Create media uploads directory with proper permissions
+RUN mkdir -p /app/uploads/media && chown -R nextjs:nodejs /app/uploads
+
 USER nextjs
 
 EXPOSE 3000

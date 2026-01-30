@@ -4,13 +4,15 @@ import { useState, useEffect, useCallback } from "react"
 import { Chat, Contact } from "@/lib/difusion"
 import { ChatList } from "./ChatList"
 import { ChatWindow } from "./ChatWindow"
+import { MediaManager } from "./MediaManager"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   LogOut,
   MessageSquare,
   Search,
-  RefreshCw
+  RefreshCw,
+  HardDrive
 } from "lucide-react"
 
 interface ChatAppProps {
@@ -25,6 +27,7 @@ export function ChatApp({ onLogout }: ChatAppProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [loggingOut, setLoggingOut] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [mediaManagerOpen, setMediaManagerOpen] = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
@@ -140,6 +143,15 @@ export function ChatApp({ onLogout }: ChatAppProps) {
               <Button
                 variant="ghost"
                 size="icon"
+                onClick={() => setMediaManagerOpen(true)}
+                className="text-white hover:bg-emerald-700"
+                title="Almacenamiento multimedia"
+              >
+                <HardDrive className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={fetchData}
                 className="text-white hover:bg-emerald-700"
                 title="Actualizar"
@@ -215,6 +227,12 @@ export function ChatApp({ onLogout }: ChatAppProps) {
           </div>
         )}
       </div>
+
+      {/* Media Manager Modal */}
+      <MediaManager
+        isOpen={mediaManagerOpen}
+        onClose={() => setMediaManagerOpen(false)}
+      />
     </div>
   )
 }

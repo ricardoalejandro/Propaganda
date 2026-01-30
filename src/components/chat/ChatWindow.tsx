@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Message, Chat, Contact } from "@/lib/difusion"
 import { MessageBubble } from "./MessageBubble"
+import { ChatInput } from "./ChatInput"
 import { Avatar } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { formatPhone, isGroup } from "@/lib/utils"
-import { Loader2, Send, ArrowLeft, Users } from "lucide-react"
+import { Loader2, ArrowLeft, Users } from "lucide-react"
 
 interface ChatWindowProps {
   chat: Chat
@@ -19,9 +19,10 @@ export function ChatWindow({ chat, contacts, onBack }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
-  const [newMessage, setNewMessage] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
+  const isInitialLoad = useRef(true)
 
   // Get chat name
   const contactMap = new Map(contacts.map(c => [c.jid, c.name]))
@@ -33,6 +34,21 @@ export function ChatWindow({ chat, contacts, onBack }: ChatWindowProps) {
     if (contactName) return contactName
     return formatPhone(chat.jid)
   }
+
+  // Check if user is near bottom of messages
+  const checkIfNearBottom = useCallback(() => {
+    const container = messagesContainerRef.current
+    if (!container) return true
+
+    const threshold = 150 // pixels from bottom
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    return distanceFromBottom < threshold
+  }, [])
+
+  // Handle scroll events
+  const handleScroll = useCallback(() => {
+    setShouldAutoScroll(checkIfNearBottom())
+  }, [checkIfNearBottom])
 
   const fetchMessages = useCallback(async () => {
     try {
@@ -59,57 +75,165 @@ export function ChatWindow({ chat, contacts, onBack }: ChatWindowProps) {
     return () => clearInterval(interval)
   }, [fetchMessages])
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom only when appropriate
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    if (isInitialLoad.current && messages.length > 0) {
+      // Always scroll on initial load
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+      isInitialLoad.current = false
+    } else if (shouldAutoScroll && messages.length > 0) {
+      // Only auto-scroll if user was already at bottom
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+  }, [messages, shouldAutoScroll])
 
-  // Focus input on mount
+  // Reset initial load flag when chat changes
   useEffect(() => {
-    inputRef.current?.focus()
+    isInitialLoad.current = true
+    setShouldAutoScroll(true)
+    setLoading(true)
+    setMessages([])
   }, [chat.jid])
 
-  const handleSend = async () => {
-    if (!newMessage.trim() || sending) return
+  // Get phone number from JID
+  const getPhone = () => chat.jid.split('@')[0]
 
+  // Send text message
+  const handleSendMessage = async (message: string) => {
     setSending(true)
-    const messageText = newMessage.trim()
-    setNewMessage("")
-
     try {
-      // Get phone number from JID
-      const phone = chat.jid.split('@')[0]
-
       const response = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, message: messageText }),
+        body: JSON.stringify({ phone: getPhone(), message }),
       })
-
       const data = await response.json()
-
       if (data.code === "SUCCESS") {
-        // Refresh messages
+        setShouldAutoScroll(true)
         await fetchMessages()
       } else {
         console.error("Error sending:", data.message)
         alert(`Error: ${data.message || 'No se pudo enviar el mensaje'}`)
-        setNewMessage(messageText) // Restore message on error
       }
     } catch (err) {
       console.error("Error sending message:", err)
       alert("Error de conexión al enviar mensaje")
-      setNewMessage(messageText)
     } finally {
       setSending(false)
-      inputRef.current?.focus()
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
+  // Send image
+  const handleSendImage = async (file: File, caption?: string) => {
+    setSending(true)
+    try {
+      const formData = new FormData()
+      formData.append('phone', getPhone())
+      formData.append('image', file)
+      if (caption) formData.append('caption', caption)
+
+      const response = await fetch("/api/send/image", {
+        method: "POST",
+        body: formData,
+      })
+      const data = await response.json()
+      if (data.code === "SUCCESS") {
+        setShouldAutoScroll(true)
+        await fetchMessages()
+      } else {
+        console.error("Error sending image:", data.message)
+        alert(`Error: ${data.message || 'No se pudo enviar la imagen'}`)
+      }
+    } catch (err) {
+      console.error("Error sending image:", err)
+      alert("Error de conexión al enviar imagen")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // Send file
+  const handleSendFile = async (file: File) => {
+    setSending(true)
+    try {
+      const formData = new FormData()
+      formData.append('phone', getPhone())
+      formData.append('file', file)
+
+      const response = await fetch("/api/send/file", {
+        method: "POST",
+        body: formData,
+      })
+      const data = await response.json()
+      if (data.code === "SUCCESS") {
+        setShouldAutoScroll(true)
+        await fetchMessages()
+      } else {
+        console.error("Error sending file:", data.message)
+        alert(`Error: ${data.message || 'No se pudo enviar el archivo'}`)
+      }
+    } catch (err) {
+      console.error("Error sending file:", err)
+      alert("Error de conexión al enviar archivo")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // Send audio
+  const handleSendAudio = async (blob: Blob) => {
+    setSending(true)
+    try {
+      const formData = new FormData()
+      formData.append('phone', getPhone())
+      formData.append('audio', blob, 'voice-note.ogg')
+
+      const response = await fetch("/api/send/audio", {
+        method: "POST",
+        body: formData,
+      })
+      const data = await response.json()
+      if (data.code === "SUCCESS") {
+        setShouldAutoScroll(true)
+        await fetchMessages()
+      } else {
+        console.error("Error sending audio:", data.message)
+        alert(`Error: ${data.message || 'No se pudo enviar el audio'}`)
+      }
+    } catch (err) {
+      console.error("Error sending audio:", err)
+      alert("Error de conexión al enviar audio")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // Send video
+  const handleSendVideo = async (file: File, caption?: string) => {
+    setSending(true)
+    try {
+      const formData = new FormData()
+      formData.append('phone', getPhone())
+      formData.append('video', file)
+      if (caption) formData.append('caption', caption)
+
+      const response = await fetch("/api/send/video", {
+        method: "POST",
+        body: formData,
+      })
+      const data = await response.json()
+      if (data.code === "SUCCESS") {
+        setShouldAutoScroll(true)
+        await fetchMessages()
+      } else {
+        console.error("Error sending video:", data.message)
+        alert(`Error: ${data.message || 'No se pudo enviar el video'}`)
+      }
+    } catch (err) {
+      console.error("Error sending video:", err)
+      alert("Error de conexión al enviar video")
+    } finally {
+      setSending(false)
     }
   }
 
@@ -148,6 +272,8 @@ export function ChatWindow({ chat, contacts, onBack }: ChatWindowProps) {
 
       {/* Messages */}
       <div
+        ref={messagesContainerRef}
+        onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4"
         style={{
           backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d1d5db' fill-opacity='0.2'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
@@ -173,28 +299,14 @@ export function ChatWindow({ chat, contacts, onBack }: ChatWindowProps) {
       </div>
 
       {/* Input */}
-      <div className="bg-white border-t p-3 flex items-center gap-2">
-        <Input
-          ref={inputRef}
-          value={newMessage}
-          onChange={(e) => setNewMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Escribe un mensaje..."
-          className="flex-1"
-          disabled={sending}
-        />
-        <Button
-          onClick={handleSend}
-          disabled={!newMessage.trim() || sending}
-          className="bg-emerald-500 hover:bg-emerald-600"
-        >
-          {sending ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <Send className="w-5 h-5" />
-          )}
-        </Button>
-      </div>
+      <ChatInput
+        onSendMessage={handleSendMessage}
+        onSendImage={handleSendImage}
+        onSendFile={handleSendFile}
+        onSendAudio={handleSendAudio}
+        onSendVideo={handleSendVideo}
+        disabled={sending}
+      />
     </div>
   )
 }

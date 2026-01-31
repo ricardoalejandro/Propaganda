@@ -1,0 +1,138 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id        String   @id @default(cuid())
+  name      String   // Display name
+  slug      String   @unique // URL-safe identifier
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  connections Connection[]
+  leads       Lead[]
+  customFields CustomField[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  isAdmin      Boolean  @default(false) // super admin flag
+  accountId    String?
+  account      Account? @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Connection {
+  id          String   @id @default(cuid())
+  name        String   // Display name for this connection
+  deviceId    String?  // WhatsApp device ID from difusion
+  isConnected Boolean  @default(false)
+  isLoggedIn  Boolean  @default(false)
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  chats       Chat[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Chat {
+  id           String    @id @default(cuid())
+  jid          String    // WhatsApp JID
+  name         String
+  lastMessage  String?
+  lastMsgTime  DateTime?
+  connectionId String
+  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([jid, connectionId])
+  @@index([connectionId])
+  @@index([lastMsgTime])
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  externalId String   // ID from difusion
+  chatId     String
+  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderJid  String
+  content    String?
+  timestamp  DateTime
+  isFromMe   Boolean
+  mediaType  String?
+  filename   String?
+  url        String?
+  localUrl   String?  // Local cached media URL
+  fileLength Int?
+  createdAt  DateTime @default(now())
+
+  @@unique([externalId, chatId])
+  @@index([chatId])
+  @@index([timestamp])
+}
+
+model Lead {
+  id        String   @id @default(cuid())
+  jid       String?  // WhatsApp JID linkage
+  name      String
+  phone     String?
+  email     String?
+  address   String?
+  stage     String   @default("new")
+  notes     String?
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  customValues LeadCustomValue[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([accountId, jid]) // Unique lead per JID within an account
+  @@index([accountId])
+  @@index([stage])
+}
+
+model CustomField {
+  id        String   @id @default(cuid())
+  name      String
+  key       String // internal slug
+  type      String // TEXT, NUMBER, DATE, SELECT
+  options   String? // JSON array for SELECT options
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  values    LeadCustomValue[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([accountId, key])
+}
+
+model LeadCustomValue {
+  id            String      @id @default(cuid())
+  leadId        String
+  lead          Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  customFieldId String
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+  value         String
+
+  @@unique([leadId, customFieldId])
+}

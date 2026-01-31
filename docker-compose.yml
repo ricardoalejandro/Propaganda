@@ -9,6 +9,12 @@ services:
       - DIFUSION_USER=admin
       - DIFUSION_PASS=c2rfoitp1ennzsfsdfsdlkl79mg3rstydwels
       - MEDIA_DIR=/app/uploads/media
+      - DATABASE_URL=postgresql://propaganda:propaganda_secret@postgres:5432/propaganda
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=propaganda_jwt_secret_change_in_production_2026
+      - SUPER_ADMIN_USER=admin
+      - SUPER_ADMIN_PASS=difusion123
+      - SUPER_ADMIN_EMAIL=admin@propaganda.local
     volumes:
       - propaganda-media:/app/uploads/media
     labels:
@@ -19,9 +25,48 @@ services:
       - "traefik.http.services.propaganda.loadbalancer.server.port=3000"
     networks:
       - dokploy-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    container_name: propaganda-redis
+    restart: always
+    volumes:
+      - propaganda-redis:/data
+    networks:
+      - dokploy-network
+    command: redis-server --appendonly yes
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: propaganda-postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=propaganda
+      - POSTGRES_PASSWORD=propaganda_secret
+      - POSTGRES_DB=propaganda
+    volumes:
+      - propaganda-db:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - dokploy-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U propaganda -d propaganda"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   propaganda-media:
+    driver: local
+  propaganda-db:
+    driver: local
+  propaganda-redis:
     driver: local
 
 networks:

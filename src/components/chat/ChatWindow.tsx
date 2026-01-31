@@ -7,15 +7,17 @@ import { ChatInput } from "./ChatInput"
 import { Avatar } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { formatPhone, isGroup } from "@/lib/utils"
-import { Loader2, ArrowLeft, Users } from "lucide-react"
+import { Loader2, ArrowLeft, Users, Info } from "lucide-react"
+import { LeadDetailsPanel } from "./LeadDetailsPanel"
 
 interface ChatWindowProps {
   chat: Chat
   contacts: Contact[]
   onBack?: () => void
+  isConnected?: boolean
 }
 
-export function ChatWindow({ chat, contacts, onBack }: ChatWindowProps) {
+export function ChatWindow({ chat, contacts, onBack, isConnected = true }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -23,6 +25,7 @@ export function ChatWindow({ chat, contacts, onBack }: ChatWindowProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
   const isInitialLoad = useRef(true)
+  const [showLeadPanel, setShowLeadPanel] = useState(false)
 
   // Get chat name
   const contactMap = new Map(contacts.map(c => [c.jid, c.name]))
@@ -76,14 +79,21 @@ export function ChatWindow({ chat, contacts, onBack }: ChatWindowProps) {
   }, [fetchMessages])
 
   // Scroll to bottom only when appropriate
+  // Scroll to bottom only when appropriate
   useEffect(() => {
-    if (isInitialLoad.current && messages.length > 0) {
-      // Always scroll on initial load
-      messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+    const container = messagesContainerRef.current
+    if (!container || messages.length === 0) return
+
+    if (isInitialLoad.current) {
+      // Always scroll on initial load (instant)
+      container.scrollTop = container.scrollHeight
       isInitialLoad.current = false
-    } else if (shouldAutoScroll && messages.length > 0) {
-      // Only auto-scroll if user was already at bottom
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    } else if (shouldAutoScroll) {
+      // Auto-scroll if user was at bottom
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth"
+      })
     }
   }, [messages, shouldAutoScroll])
 
@@ -241,72 +251,93 @@ export function ChatWindow({ chat, contacts, onBack }: ChatWindowProps) {
   const chatName = getChatName()
 
   return (
-    <div className="flex flex-col h-full bg-gray-100">
-      {/* Header */}
-      <div className="bg-emerald-600 text-white px-4 py-3 flex items-center gap-3 shadow-md">
-        {onBack && (
+    <div className="flex h-full overflow-hidden">
+      <div className="flex-1 flex flex-col h-full bg-gray-100 min-w-0 border-r relative z-0">
+        {/* Header */}
+        <div className="bg-emerald-600 text-white px-4 py-3 flex items-center gap-3 shadow-md">
+          {onBack && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onBack}
+              className="text-white hover:bg-emerald-700 md:hidden"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+          )}
+          <div className="relative">
+            <Avatar name={chatName} size="md" className="border-2 border-emerald-400" />
+            {isGroupChat && (
+              <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5">
+                <Users className="w-3 h-3 text-emerald-600" />
+              </div>
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="font-semibold truncate">{chatName}</h2>
+            <p className="text-xs text-emerald-100 truncate">
+              {isGroupChat ? "Grupo" : formatPhone(chat.jid)}
+            </p>
+
+          </div>
+
           <Button
             variant="ghost"
             size="icon"
-            onClick={onBack}
-            className="text-white hover:bg-emerald-700 md:hidden"
+            onClick={() => setShowLeadPanel(!showLeadPanel)}
+            className={`text-white hover:bg-emerald-700 ${showLeadPanel ? 'bg-emerald-700' : ''}`}
+            title="Info del contacto"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <Info className="w-5 h-5" />
           </Button>
-        )}
-        <div className="relative">
-          <Avatar name={chatName} size="md" className="border-2 border-emerald-400" />
-          {isGroupChat && (
-            <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5">
-              <Users className="w-3 h-3 text-emerald-600" />
+        </div>
+
+        {/* Messages */}
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto overflow-x-hidden p-4"
+          style={{
+            backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d1d5db' fill-opacity='0.2'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
+          }}
+        >
+          {loading ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
             </div>
+          ) : messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400">
+              <p>No hay mensajes</p>
+              <p className="text-sm">¡Envía el primero!</p>
+            </div>
+          ) : (
+            <>
+              {messages.map((msg) => (
+                <MessageBubble key={msg.id} message={msg} />
+              ))}
+              <div ref={messagesEndRef} />
+            </>
           )}
         </div>
-        <div className="flex-1 min-w-0">
-          <h2 className="font-semibold truncate">{chatName}</h2>
-          <p className="text-xs text-emerald-100 truncate">
-            {isGroupChat ? "Grupo" : formatPhone(chat.jid)}
-          </p>
-        </div>
+
+        {/* Input */}
+        <ChatInput
+          onSendMessage={handleSendMessage}
+          onSendImage={handleSendImage}
+          onSendFile={handleSendFile}
+          onSendAudio={handleSendAudio}
+          onSendVideo={handleSendVideo}
+          disabled={sending || !isConnected}
+          disabledReason={!isConnected ? 'Conecta tu WhatsApp para enviar mensajes' : undefined}
+        />
       </div>
 
-      {/* Messages */}
-      <div
-        ref={messagesContainerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4"
-        style={{
-          backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d1d5db' fill-opacity='0.2'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
-        }}
-      >
-        {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400">
-            <p>No hay mensajes</p>
-            <p className="text-sm">¡Envía el primero!</p>
-          </div>
-        ) : (
-          <>
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
-            <div ref={messagesEndRef} />
-          </>
-        )}
-      </div>
-
-      {/* Input */}
-      <ChatInput
-        onSendMessage={handleSendMessage}
-        onSendImage={handleSendImage}
-        onSendFile={handleSendFile}
-        onSendAudio={handleSendAudio}
-        onSendVideo={handleSendVideo}
-        disabled={sending}
-      />
+      {showLeadPanel && (
+        <LeadDetailsPanel
+          jid={chat.jid}
+          onClose={() => setShowLeadPanel(false)}
+        />
+      )}
     </div>
   )
 }

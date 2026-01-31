@@ -5,9 +5,13 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+COPY prisma ./prisma/
 
 # Install dependencies
 RUN npm ci
+
+# Generate Prisma client
+RUN npx prisma generate
 
 # Copy source code
 COPY . .
@@ -31,8 +35,15 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
+# Copy Prisma files for migrations
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+
 # Create media uploads directory with proper permissions
-RUN mkdir -p /app/uploads/media && chown -R nextjs:nodejs /app/uploads
+RUN mkdir -p /app/uploads/media
+RUN chown -R nextjs:nodejs /app/uploads
+RUN chown -R nextjs:nodejs /app/.next
 
 USER nextjs
 

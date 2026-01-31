@@ -17,9 +17,11 @@ import {
 
 interface ChatAppProps {
   onLogout: () => void
+  embedded?: boolean
+  isConnected?: boolean
 }
 
-export function ChatApp({ onLogout }: ChatAppProps) {
+export function ChatApp({ onLogout, embedded = false, isConnected = true }: ChatAppProps) {
   const [chats, setChats] = useState<Chat[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
   const [selectedChatJid, setSelectedChatJid] = useState<string | null>(null)
@@ -28,6 +30,15 @@ export function ChatApp({ onLogout }: ChatAppProps) {
   const [loggingOut, setLoggingOut] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mediaManagerOpen, setMediaManagerOpen] = useState(false)
+  const [isDesktop, setIsDesktop] = useState(true) // Desktop by default for SSR
+
+  // Track viewport size to determine if we're on desktop
+  useEffect(() => {
+    const checkIsDesktop = () => setIsDesktop(window.innerWidth >= 768)
+    checkIsDesktop()
+    window.addEventListener('resize', checkIsDesktop)
+    return () => window.removeEventListener('resize', checkIsDesktop)
+  }, [])
 
   const fetchData = useCallback(async () => {
     try {
@@ -67,25 +78,8 @@ export function ChatApp({ onLogout }: ChatAppProps) {
     return () => clearInterval(interval)
   }, [fetchData])
 
-  // Periodically check connection status and auto-logout if disconnected
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const response = await fetch("/api/status")
-        const data = await response.json()
-        if (!data.results?.is_logged_in) {
-          console.log("Session lost, logging out")
-          onLogout()
-        }
-      } catch (err) {
-        console.error("Error checking connection status:", err)
-      }
-    }
-
-    // Check connection every 15 seconds
-    const interval = setInterval(checkConnection, 15000)
-    return () => clearInterval(interval)
-  }, [onLogout])
+  // Note: Auto-logout removed - we now show cached messages even when disconnected
+  // The isConnected prop controls whether sending is enabled
 
   const handleLogout = async () => {
     if (loggingOut) return
@@ -125,20 +119,30 @@ export function ChatApp({ onLogout }: ChatAppProps) {
   }
 
   return (
-    <div className="h-screen flex bg-white">
-      {/* Sidebar */}
-      <div className={`
-        ${sidebarOpen ? 'flex' : 'hidden'} 
-        md:flex flex-col w-full md:w-80 lg:w-96 border-r bg-white
-        absolute md:relative z-10 h-full
-      `}>
+    <div className={`${embedded ? 'h-full' : 'h-screen'} flex bg-white`}>
+      {/* Sidebar with chat list - always visible on desktop/embedded */}
+      <div
+        className={`
+          flex-col ${embedded ? 'w-80 lg:w-96' : 'w-full md:w-80 lg:w-96'} 
+          border-r bg-white shrink-0 h-full
+        `}
+        style={{
+          // Always show in embedded mode; on desktop always show; on mobile depends on state
+          display: embedded || isDesktop || sidebarOpen || !selectedChat ? 'flex' : 'none',
+        }}
+      >
         {/* Sidebar Header */}
         <div className="bg-emerald-600 text-white px-4 py-3">
           <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="w-6 h-6" />
-              <h1 className="text-lg font-bold">Propaganda</h1>
-            </div>
+            {!embedded && (
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-6 h-6" />
+                <h1 className="text-lg font-bold">Propaganda</h1>
+              </div>
+            )}
+            {embedded && (
+              <h2 className="text-lg font-semibold">Chats</h2>
+            )}
             <div className="flex items-center gap-1">
               <Button
                 variant="ghost"
@@ -158,16 +162,18 @@ export function ChatApp({ onLogout }: ChatAppProps) {
               >
                 <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleLogout}
-                disabled={loggingOut}
-                className="text-white hover:bg-emerald-700"
-                title="Cerrar sesión"
-              >
-                <LogOut className={`w-5 h-5 ${loggingOut ? 'animate-pulse' : ''}`} />
-              </Button>
+              {!embedded && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleLogout}
+                  disabled={loggingOut}
+                  className="text-white hover:bg-emerald-700"
+                  title="Cerrar sesión"
+                >
+                  <LogOut className={`w-5 h-5 ${loggingOut ? 'animate-pulse' : ''}`} />
+                </Button>
+              )}
             </div>
           </div>
           <div className="relative">
@@ -213,6 +219,7 @@ export function ChatApp({ onLogout }: ChatAppProps) {
             chat={selectedChat}
             contacts={contacts}
             onBack={handleBack}
+            isConnected={isConnected}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 text-gray-400">

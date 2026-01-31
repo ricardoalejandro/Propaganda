@@ -70,7 +70,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   }, [message.id, message.media_type, message.url, message.filename])
 
   // Get the URL to use (prefer local, fallback to original)
-  const mediaUrl = localUrl || message.url
+  const mediaUrl = localUrl
+    ? `${localUrl}?v=2` // Force cache bust for previously failed attempts
+    : message.url
 
   // Handle image error (URL expired)
   const handleImageError = () => {
@@ -239,7 +241,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
   return (
     <div className={cn(
-      "flex mb-2",
+      "flex mb-2 min-w-0 overflow-hidden",
       isMe ? "justify-end" : "justify-start"
     )}>
       <div className={cn(

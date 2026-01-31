@@ -22,6 +22,7 @@ interface ChatInputProps {
     onSendAudio: (blob: Blob) => Promise<void>
     onSendVideo: (file: File, caption?: string) => Promise<void>
     disabled?: boolean
+    disabledReason?: string
 }
 
 interface PendingMedia {
@@ -36,7 +37,8 @@ export function ChatInput({
     onSendFile,
     onSendAudio,
     onSendVideo,
-    disabled = false
+    disabled = false,
+    disabledReason
 }: ChatInputProps) {
     const [message, setMessage] = useState("")
     const [sending, setSending] = useState(false)
@@ -185,6 +187,13 @@ export function ChatInput({
 
     return (
         <div className="bg-white border-t">
+            {/* Disabled reason message */}
+            {disabled && disabledReason && (
+                <div className="px-4 py-2 bg-amber-50 text-amber-700 text-sm text-center border-b">
+                    ⚠️ {disabledReason}
+                </div>
+            )}
+
             {/* Pending media preview */}
             {pendingMedia && (
                 <div className="p-3 border-b bg-gray-50">

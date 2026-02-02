@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios'
 import { CookieJar } from 'tough-cookie'
 import { promisify } from 'util'
 
@@ -22,6 +22,38 @@ export const difusionServer = axios.create({
     'Content-Type': 'application/json',
   },
 })
+
+// Helper to create request with device ID header
+export function withDeviceId(deviceId: string): AxiosInstance {
+  const instance = axios.create({
+    baseURL: DIFUSION_URL,
+    auth: {
+      username: DIFUSION_USER,
+      password: DIFUSION_PASS,
+    },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Device-Id': deviceId,
+    },
+  })
+  
+  // Copy interceptors
+  instance.interceptors.request.use(async (request: InternalAxiosRequestConfig) => {
+    const url = request.url ? new URL(request.url, DIFUSION_URL).toString() : DIFUSION_URL
+    try {
+      const cookieHeader = await getCookieString(url)
+      if (cookieHeader) {
+        request.headers.set('Cookie', cookieHeader)
+      }
+    } catch (err) {
+      console.error('Error getting cookies:', err)
+    }
+    console.log(`[Difusion Request] ${request.method?.toUpperCase()} ${request.url} [Device: ${deviceId}]`)
+    return request
+  })
+  
+  return instance
+}
 
 // Debug and Cookie interceptors
 difusionServer.interceptors.request.use(async request => {
@@ -157,4 +189,96 @@ export interface ContactsResponse {
 export interface SendMessageResponse {
   message_id: string
   status: string
+}
+
+// ============================================
+// API v8 Multi-Device Types
+// ============================================
+
+export interface DeviceV8 {
+  id: string
+  jid: string
+  display_name: string
+  state: 'connected' | 'disconnected' | 'connecting'
+  created_at: string
+}
+
+export interface DeviceCreateResponse {
+  id: string
+  jid: string
+  display_name: string
+  state: string
+  created_at: string
+}
+
+export interface DeviceLoginResponse {
+  qr_link: string
+  qr_duration: number
+  code?: string
+}
+
+export interface DeviceStatusResponse {
+  device_id: string
+  is_connected: boolean
+  is_logged_in: boolean
+  jid?: string
+  display_name?: string
+}
+
+// ============================================
+// API v8 Multi-Device Helpers
+// ============================================
+
+export const DevicesAPI = {
+  // List all devices
+  list: async () => {
+    const response = await difusionServer.get<DifusionResponse<DeviceV8[] | null>>('/devices')
+    return response.data
+  },
+
+  // Create new device
+  create: async (name: string) => {
+    const response = await difusionServer.post<DifusionResponse<DeviceCreateResponse>>('/devices', { name })
+    return response.data
+  },
+
+  // Get device info
+  get: async (deviceId: string) => {
+    const response = await difusionServer.get<DifusionResponse<DeviceV8>>(`/devices/${deviceId}`)
+    return response.data
+  },
+
+  // Delete device
+  delete: async (deviceId: string) => {
+    const response = await difusionServer.delete<DifusionResponse<null>>(`/devices/${deviceId}`)
+    return response.data
+  },
+
+  // Get login QR for device
+  login: async (deviceId: string) => {
+    // Use /app/login with X-Device-Id header (v8 API)
+    const client = withDeviceId(deviceId)
+    const response = await client.get<DifusionResponse<DeviceLoginResponse>>('/app/login')
+    return response.data
+  },
+
+  // Logout device
+  logout: async (deviceId: string) => {
+    const response = await difusionServer.post<DifusionResponse<null>>(`/devices/${deviceId}/logout`)
+    return response.data
+  },
+
+  // Get device status
+  status: async (deviceId: string) => {
+    // Use /app/status with X-Device-Id header (v8 API)
+    const client = withDeviceId(deviceId)
+    const response = await client.get<DifusionResponse<DeviceStatusResponse>>('/app/status')
+    return response.data
+  },
+
+  // Reconnect device
+  reconnect: async (deviceId: string) => {
+    const response = await difusionServer.post<DifusionResponse<null>>(`/devices/${deviceId}/reconnect`)
+    return response.data
+  }
 }

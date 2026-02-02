@@ -1,4 +1,7 @@
-import { difusionServer, DifusionResponse } from '@/lib/difusion'
+import { difusionServer, withDeviceId, DifusionResponse } from '@/lib/difusion'
+import { prisma } from '@/lib/db'
+import { getSession } from '@/lib/auth'
+import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -8,12 +11,33 @@ interface SendAudioResponse {
     status: string
 }
 
+async function getDeviceId(connectionId: string | null): Promise<string | null> {
+    if (!connectionId) return null
+    const cookieStore = await cookies()
+    const token = cookieStore.get('auth-token')?.value
+    if (!token) return null
+    
+    try {
+        const session = await getSession()
+        if (!session?.accountId) return null
+        
+        const connection = await prisma.connection.findFirst({
+            where: { id: connectionId, accountId: session.accountId }
+        })
+        return connection?.deviceId || null
+    } catch {
+        return null
+    }
+}
+
 export async function POST(request: NextRequest) {
     try {
         const formData = await request.formData()
         const phone = formData.get('phone') as string
         const audio = formData.get('audio') as File | null
         const audioUrl = formData.get('audioUrl') as string | null
+        const deviceId = formData.get('device_id') as string | null
+        const connectionId = formData.get('connection_id') as string | null
 
         if (!phone) {
             return NextResponse.json(
@@ -28,6 +52,9 @@ export async function POST(request: NextRequest) {
                 { status: 400 }
             )
         }
+
+        const actualDeviceId = deviceId || await getDeviceId(connectionId)
+        const client = actualDeviceId ? withDeviceId(actualDeviceId) : difusionServer
 
         let requestBody: Record<string, unknown>
 
@@ -52,8 +79,8 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        console.log(`[Send Audio] Sending to: ${phone}`)
-        const response = await difusionServer.post<DifusionResponse<SendAudioResponse>>(
+        console.log(`[Send Audio] Sending to: ${phone} via device: ${actualDeviceId || 'default'}`)
+        const response = await client.post<DifusionResponse<SendAudioResponse>>(
             '/send/audio',
             requestBody
         )

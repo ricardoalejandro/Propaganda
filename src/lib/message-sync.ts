@@ -153,14 +153,15 @@ export async function syncMessages(
 }
 
 /**
- * Get messages - first from PostgreSQL cache, then sync new ones
+ * Get messages - SIEMPRE de PostgreSQL (independiente de conexión a Difusión)
+ * La sincronización ocurre en background, no bloquea la lectura
  */
 export async function getMessagesWithCache(
     jid: string,
     connectionId: string,
     limit: number = 50
 ): Promise<DifusionMessage[]> {
-    // Get cached messages from PostgreSQL
+    // SIEMPRE leer de PostgreSQL primero - sin esperar a Difusión
     const chat = await prisma.chat.findFirst({
         where: { jid, connectionId },
         include: {
@@ -171,40 +172,10 @@ export async function getMessagesWithCache(
         }
     })
 
-    // If no chat or no messages, sync synchronously first
-    if (!chat || chat.messages.length === 0) {
-        console.log('[Sync] First load for chat, syncing synchronously...')
-        await syncMessages(jid, connectionId, limit)
-
-        // Fetch again after sync
-        const freshChat = await prisma.chat.findFirst({
-            where: { jid, connectionId },
-            include: {
-                messages: {
-                    orderBy: { timestamp: 'desc' },
-                    take: limit
-                }
-            }
-        })
-
-        return (freshChat?.messages || []).map((m: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
-            id: m.externalId,
-            chat_jid: jid,
-            sender_jid: m.senderJid,
-            content: m.content || '',
-            timestamp: m.timestamp.toISOString(),
-            is_from_me: m.isFromMe,
-            media_type: m.mediaType || '',
-            filename: m.filename || '',
-            url: m.localUrl || m.url || '',
-            file_length: m.fileLength || 0,
-            created_at: m.createdAt.toISOString(),
-            updated_at: m.createdAt.toISOString()
-        }))
-    }
+    console.log(`[Messages] JID: ${jid}, Found: ${chat?.messages.length || 0} messages in PostgreSQL`)
 
     // Convert to difusion format
-    const cachedMessages: DifusionMessage[] = (chat?.messages || []).map((m: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+    const messages: DifusionMessage[] = (chat?.messages || []).map((m: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
         id: m.externalId,
         chat_jid: jid,
         sender_jid: m.senderJid,
@@ -219,12 +190,12 @@ export async function getMessagesWithCache(
         updated_at: m.createdAt.toISOString()
     }))
 
-    // Trigger background sync for updates
-    syncMessages(jid, connectionId, limit).catch(err => {
-        console.error('[Sync] Background sync error:', err)
+    // Trigger background sync SOLO si hay conexión activa (no bloquea)
+    syncMessages(jid, connectionId, limit).catch(() => {
+        // Silenciar errores de sync - los mensajes ya se mostraron de la DB
     })
 
-    return cachedMessages
+    return messages
 }
 
 /**

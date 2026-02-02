@@ -1,4 +1,7 @@
-import { difusionServer, DifusionResponse } from '@/lib/difusion'
+import { difusionServer, withDeviceId, DifusionResponse } from '@/lib/difusion'
+import { prisma } from '@/lib/db'
+import { getSession } from '@/lib/auth'
+import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import FormData from 'form-data'
 
@@ -9,6 +12,25 @@ interface SendImageResponse {
     status: string
 }
 
+async function getDeviceId(connectionId: string | null): Promise<string | null> {
+    if (!connectionId) return null
+    const cookieStore = await cookies()
+    const token = cookieStore.get('auth-token')?.value
+    if (!token) return null
+    
+    try {
+        const session = await getSession()
+        if (!session?.accountId) return null
+        
+        const connection = await prisma.connection.findFirst({
+            where: { id: connectionId, accountId: session.accountId }
+        })
+        return connection?.deviceId || null
+    } catch {
+        return null
+    }
+}
+
 export async function POST(request: NextRequest) {
     try {
         const formData = await request.formData()
@@ -16,6 +38,8 @@ export async function POST(request: NextRequest) {
         const caption = formData.get('caption') as string | null
         const image = formData.get('image') as File | null
         const imageUrl = formData.get('imageUrl') as string | null
+        const deviceId = formData.get('device_id') as string | null
+        const connectionId = formData.get('connection_id') as string | null
 
         if (!phone) {
             return NextResponse.json(
@@ -31,12 +55,15 @@ export async function POST(request: NextRequest) {
             )
         }
 
+        const actualDeviceId = deviceId || await getDeviceId(connectionId)
+        const client = actualDeviceId ? withDeviceId(actualDeviceId) : difusionServer
+
         let response
 
         if (imageUrl) {
             // Send via URL (JSON body)
-            console.log(`[Send Image] Sending URL to: ${phone}`)
-            response = await difusionServer.post<DifusionResponse<SendImageResponse>>(
+            console.log(`[Send Image] Sending URL to: ${phone} via device: ${actualDeviceId || 'default'}`)
+            response = await client.post<DifusionResponse<SendImageResponse>>(
                 '/send/image',
                 {
                     phone,
@@ -59,8 +86,8 @@ export async function POST(request: NextRequest) {
                 difusionFormData.append('caption', caption)
             }
 
-            console.log(`[Send Image] Sending file to: ${phone}`)
-            response = await difusionServer.post<DifusionResponse<SendImageResponse>>(
+            console.log(`[Send Image] Sending file to: ${phone} via device: ${actualDeviceId || 'default'}`)
+            response = await client.post<DifusionResponse<SendImageResponse>>(
                 '/send/image',
                 difusionFormData,
                 {

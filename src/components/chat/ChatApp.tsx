@@ -12,8 +12,19 @@ import {
   MessageSquare,
   Search,
   RefreshCw,
-  HardDrive
+  HardDrive,
+  Wifi,
+  WifiOff,
+  ChevronDown
 } from "lucide-react"
+
+interface Connection {
+  id: string
+  name: string
+  deviceId: string | null
+  isConnected: boolean
+  isLoggedIn: boolean
+}
 
 interface ChatAppProps {
   onLogout: () => void
@@ -30,9 +41,15 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
   const [loggingOut, setLoggingOut] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mediaManagerOpen, setMediaManagerOpen] = useState(false)
-  const [isDesktop, setIsDesktop] = useState(true) // Desktop by default for SSR
+  const [isDesktop, setIsDesktop] = useState(true)
+  
+  // Multi-device support
+  const [connections, setConnections] = useState<Connection[]>([])
+  const [activeConnectionId, setActiveConnectionId] = useState<string | null>('all') // 'all' = show all chats
+  const [showConnectionPicker, setShowConnectionPicker] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
 
-  // Track viewport size to determine if we're on desktop
+  // Track viewport size
   useEffect(() => {
     const checkIsDesktop = () => setIsDesktop(window.innerWidth >= 768)
     checkIsDesktop()
@@ -40,20 +57,42 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
     return () => window.removeEventListener('resize', checkIsDesktop)
   }, [])
 
+  // Fetch available connections
+  const fetchConnections = useCallback(async () => {
+    try {
+      const res = await fetch('/api/devices')
+      const data = await res.json()
+      
+      if (data.code === 'SUCCESS' && Array.isArray(data.results)) {
+        setConnections(data.results)
+        // Keep 'all' as default - don't auto-switch
+      }
+    } catch (err) {
+      console.error('Error fetching connections:', err)
+    }
+  }, [])
+
+  // Fetch chats for active connection
   const fetchData = useCallback(async () => {
     try {
-      // Fetch sequentially to avoid backend race conditions
-      const chatsRes = await fetch("/api/chats")
+      const params = new URLSearchParams()
+      // Only add connection_id if a specific connection is selected (not 'all')
+      if (activeConnectionId && activeConnectionId !== 'all') {
+        params.set('connection_id', activeConnectionId)
+      }
+
+      const chatsRes = await fetch(`/api/chats?${params.toString()}`)
       if (chatsRes.status === 401) {
-        handleLogout() // Auto logout on 401
+        handleLogout()
         return
       }
       const chatsData = await chatsRes.json()
 
-      const contactsRes = await fetch("/api/contacts")
+      // Check if response is from offline cache
+      setIsOffline(!!chatsData._offline)
+
+      const contactsRes = await fetch(`/api/contacts?${params.toString()}`)
       if (contactsRes.status === 401) {
-        // If contacts fail but chats worked, maybe just warn? 
-        // But usually 401 means global session loss.
         handleLogout()
         return
       }
@@ -67,23 +106,27 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
       }
     } catch (err) {
       console.error("Error fetching data:", err)
+      setIsOffline(true)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [activeConnectionId])
+
+  // Initial load and polling
+  useEffect(() => {
+    fetchConnections()
+    const interval = setInterval(fetchConnections, 30000) // Less frequent for connections
+    return () => clearInterval(interval)
+  }, [fetchConnections])
 
   useEffect(() => {
     fetchData()
     const interval = setInterval(fetchData, 10000)
     return () => clearInterval(interval)
-  }, [fetchData])
-
-  // Note: Auto-logout removed - we now show cached messages even when disconnected
-  // The isConnected prop controls whether sending is enabled
+  }, [fetchData, activeConnectionId])
 
   const handleLogout = async () => {
     if (loggingOut) return
-
     if (!confirm("¿Estás seguro de que quieres cerrar sesión?")) return
 
     setLoggingOut(true)
@@ -97,6 +140,8 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
   }
 
   const selectedChat = chats.find(c => c.jid === selectedChatJid)
+  const activeConnection = activeConnectionId === 'all' ? null : connections.find(c => c.id === activeConnectionId)
+  const anyConnectionLoggedIn = connections.some(c => c.isLoggedIn)
 
   // Filter chats based on search
   const filteredChats = chats.filter(chat => {
@@ -107,7 +152,6 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
     return name.includes(search) || jid.includes(search)
   })
 
-  // Handle mobile view
   const handleSelectChat = (jid: string) => {
     setSelectedChatJid(jid)
     setSidebarOpen(false)
@@ -118,16 +162,23 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
     setSelectedChatJid(null)
   }
 
+  const handleSwitchConnection = (connectionId: string) => {
+    setActiveConnectionId(connectionId)
+    setShowConnectionPicker(false)
+    setSelectedChatJid(null)
+    setChats([])
+    setLoading(true)
+  }
+
   return (
     <div className={`${embedded ? 'h-full' : 'h-screen'} flex bg-white`}>
-      {/* Sidebar with chat list - always visible on desktop/embedded */}
+      {/* Sidebar */}
       <div
         className={`
           flex-col ${embedded ? 'w-80 lg:w-96' : 'w-full md:w-80 lg:w-96'} 
           border-r bg-white shrink-0 h-full
         `}
         style={{
-          // Always show in embedded mode; on desktop always show; on mobile depends on state
           display: embedded || isDesktop || sidebarOpen || !selectedChat ? 'flex' : 'none',
         }}
       >
@@ -176,6 +227,70 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
               )}
             </div>
           </div>
+
+          {/* Connection Selector (if multiple) */}
+          {connections.length > 0 && (
+            <div className="mb-3 relative">
+              <button
+                onClick={() => setShowConnectionPicker(!showConnectionPicker)}
+                className="w-full flex items-center justify-between px-3 py-2 bg-emerald-700 rounded-lg text-sm hover:bg-emerald-800 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  {activeConnectionId === 'all' ? (
+                    <Wifi className="w-4 h-4 text-blue-300" />
+                  ) : activeConnection?.isLoggedIn ? (
+                    <Wifi className="w-4 h-4 text-green-300" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-300" />
+                  )}
+                  <span className="truncate">
+                    {activeConnectionId === 'all' ? 'Todos los chats' : activeConnection?.name || 'Seleccionar conexión'}
+                  </span>
+                </div>
+                <ChevronDown className={`w-4 h-4 transition-transform ${showConnectionPicker ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showConnectionPicker && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border z-50 max-h-48 overflow-y-auto">
+                  {/* Option to show all chats */}
+                  <button
+                    onClick={() => handleSwitchConnection('all')}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-left text-gray-700 hover:bg-gray-100 border-b ${
+                      activeConnectionId === 'all' ? 'bg-emerald-50' : ''
+                    }`}
+                  >
+                    <Wifi className="w-4 h-4 text-blue-500" />
+                    <span className="truncate text-sm font-medium">Todos los chats</span>
+                  </button>
+                  {connections.map(conn => (
+                    <button
+                      key={conn.id}
+                      onClick={() => handleSwitchConnection(conn.id)}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-gray-700 hover:bg-gray-100 ${
+                        conn.id === activeConnectionId ? 'bg-emerald-50' : ''
+                      }`}
+                    >
+                      {conn.isLoggedIn ? (
+                        <Wifi className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <WifiOff className="w-4 h-4 text-gray-400" />
+                      )}
+                      <span className="truncate text-sm">{conn.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Connection Warning Banner - only show when no connections are logged in */}
+          {!anyConnectionLoggedIn && connections.length > 0 && (
+            <div className="mb-3 px-3 py-2 bg-orange-500 text-white rounded-lg text-xs flex items-center gap-2">
+              <WifiOff className="w-4 h-4" />
+              <span>Conecta tu WhatsApp para enviar mensajes</span>
+            </div>
+          )}
+
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-emerald-200" />
             <Input
@@ -206,6 +321,7 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
         {/* Footer */}
         <div className="p-3 border-t bg-gray-50 text-center text-xs text-gray-400">
           {chats.length} conversaciones • {contacts.length} contactos
+          {connections.length > 1 && ` • ${connections.length} conexiones`}
         </div>
       </div>
 
@@ -219,7 +335,8 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
             chat={selectedChat}
             contacts={contacts}
             onBack={handleBack}
-            isConnected={isConnected}
+            isConnected={isConnected && anyConnectionLoggedIn && !isOffline}
+            connectionId={activeConnectionId === 'all' ? null : activeConnectionId}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 text-gray-400">
@@ -231,11 +348,15 @@ export function ChatApp({ onLogout, embedded = false, isConnected = true }: Chat
             </div>
             <h2 className="text-xl font-medium text-gray-600 mb-2">Propaganda Chat</h2>
             <p className="text-sm">Selecciona una conversación para comenzar</p>
+            {connections.length === 0 && (
+              <p className="text-xs mt-4 text-orange-500">
+                No hay conexiones WhatsApp. Ve a Conexiones para agregar una.
+              </p>
+            )}
           </div>
         )}
       </div>
 
-      {/* Media Manager Modal */}
       <MediaManager
         isOpen={mediaManagerOpen}
         onClose={() => setMediaManagerOpen(false)}

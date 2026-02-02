@@ -15,9 +15,10 @@ interface ChatWindowProps {
   contacts: Contact[]
   onBack?: () => void
   isConnected?: boolean
+  connectionId?: string | null
 }
 
-export function ChatWindow({ chat, contacts, onBack, isConnected = true }: ChatWindowProps) {
+export function ChatWindow({ chat, contacts, onBack, isConnected = true, connectionId }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -55,7 +56,9 @@ export function ChatWindow({ chat, contacts, onBack, isConnected = true }: ChatW
 
   const fetchMessages = useCallback(async () => {
     try {
-      const response = await fetch(`/api/chats/${encodeURIComponent(chat.jid)}/messages`, { cache: 'no-store' })
+      const params = new URLSearchParams()
+      if (connectionId) params.set('connection_id', connectionId)
+      const response = await fetch(`/api/chats/${encodeURIComponent(chat.jid)}/messages?${params.toString()}`, { cache: 'no-store' })
       const data = await response.json()
       if (data.results?.data) {
         // Sort messages by timestamp ascending
@@ -69,7 +72,7 @@ export function ChatWindow({ chat, contacts, onBack, isConnected = true }: ChatW
     } finally {
       setLoading(false)
     }
-  }, [chat.jid])
+  }, [chat.jid, connectionId])
 
   // Fetch messages on mount and periodically
   useEffect(() => {
@@ -115,7 +118,7 @@ export function ChatWindow({ chat, contacts, onBack, isConnected = true }: ChatW
       const response = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: getPhone(), message }),
+        body: JSON.stringify({ phone: getPhone(), message, connection_id: connectionId }),
       })
       const data = await response.json()
       if (data.code === "SUCCESS") {
@@ -141,6 +144,7 @@ export function ChatWindow({ chat, contacts, onBack, isConnected = true }: ChatW
       formData.append('phone', getPhone())
       formData.append('image', file)
       if (caption) formData.append('caption', caption)
+      if (connectionId) formData.append('connection_id', connectionId)
 
       const response = await fetch("/api/send/image", {
         method: "POST",
@@ -169,6 +173,7 @@ export function ChatWindow({ chat, contacts, onBack, isConnected = true }: ChatW
       const formData = new FormData()
       formData.append('phone', getPhone())
       formData.append('file', file)
+      if (connectionId) formData.append('connection_id', connectionId)
 
       const response = await fetch("/api/send/file", {
         method: "POST",
@@ -197,6 +202,7 @@ export function ChatWindow({ chat, contacts, onBack, isConnected = true }: ChatW
       const formData = new FormData()
       formData.append('phone', getPhone())
       formData.append('audio', blob, 'voice-note.ogg')
+      if (connectionId) formData.append('connection_id', connectionId)
 
       const response = await fetch("/api/send/audio", {
         method: "POST",
@@ -226,6 +232,7 @@ export function ChatWindow({ chat, contacts, onBack, isConnected = true }: ChatW
       formData.append('phone', getPhone())
       formData.append('video', file)
       if (caption) formData.append('caption', caption)
+      if (connectionId) formData.append('connection_id', connectionId)
 
       const response = await fetch("/api/send/video", {
         method: "POST",

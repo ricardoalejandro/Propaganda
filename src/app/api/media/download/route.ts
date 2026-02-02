@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import fs from 'fs/promises'
 import path from 'path'
-import https from 'https'
-import http from 'http'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
 const MEDIA_DIR = process.env.MEDIA_DIR || '/app/uploads/media'
+const DIFUSION_URL = process.env.NEXT_PUBLIC_DIFUSION_URL || 'https://difusion.naperu.cloud'
+const DIFUSION_USER = process.env.DIFUSION_USER || 'admin'
+const DIFUSION_PASS = process.env.DIFUSION_PASS || ''
 
 // In-memory cache of failed downloads to avoid retrying
 const failedDownloads = new Map<string, { timestamp: number; error: string }>()
@@ -18,86 +20,27 @@ interface DownloadRequest {
     filename?: string
 }
 
-interface DownloadResult {
-    success: boolean
-    statusCode?: number
-    error?: string
+interface DifusionMediaResponse {
+    code: string
+    message: string
+    results?: {
+        message_id: string
+        status: string
+        media_type: string
+        filename: string
+        file_path: string
+    }
 }
 
-// Download a file from URL and save locally
-async function downloadFile(url: string, destPath: string): Promise<DownloadResult> {
-    return new Promise((resolve) => {
-        const protocol = url.startsWith('https') ? https : http
-
-        const request = protocol.get(url, {
-            timeout: 30000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        }, (response) => {
-            // Handle redirects
-            if (response.statusCode === 301 || response.statusCode === 302) {
-                const redirectUrl = response.headers.location
-                if (redirectUrl) {
-                    downloadFile(redirectUrl, destPath).then(resolve)
-                    return
-                }
-            }
-
-            // Handle expired URLs (410 Gone)
-            if (response.statusCode === 410) {
-                resolve({ success: false, statusCode: 410, error: 'URL expired (Gone)' })
-                return
-            }
-
-            // Handle other errors
-            if (response.statusCode !== 200) {
-                resolve({
-                    success: false,
-                    statusCode: response.statusCode,
-                    error: `HTTP ${response.statusCode}: ${response.statusMessage}`
-                })
-                return
-            }
-
-            const chunks: Buffer[] = []
-            response.on('data', (chunk) => chunks.push(chunk))
-            response.on('end', async () => {
-                try {
-                    const buffer = Buffer.concat(chunks)
-                    await fs.writeFile(destPath, buffer)
-                    resolve({ success: true })
-                } catch (err) {
-                    resolve({
-                        success: false,
-                        error: err instanceof Error ? err.message : 'Write failed'
-                    })
-                }
-            })
-            response.on('error', (err) => {
-                resolve({ success: false, error: err.message })
-            })
-        })
-
-        request.on('error', (err) => {
-            resolve({ success: false, error: err.message })
-        })
-        request.on('timeout', () => {
-            request.destroy()
-            resolve({ success: false, error: 'Request timeout' })
-        })
-    })
-}
-
-// POST: Download media from WhatsApp URL and store locally
+// POST: Download media via Difusion proxy API (decrypts WhatsApp media)
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json() as DownloadRequest
-        const { url, messageId, filename } = body
+        const { messageId, filename } = body
 
-        if (!url || !messageId) {
+        if (!messageId) {
             return NextResponse.json(
-                { code: 'ERROR', message: 'url and messageId are required' },
+                { code: 'ERROR', message: 'messageId is required' },
                 { status: 400 }
             )
         }
@@ -107,14 +50,12 @@ export async function POST(request: NextRequest) {
         if (failedEntry) {
             const age = Date.now() - failedEntry.timestamp
             if (age < FAILED_CACHE_TTL) {
-                // Return cached failure without retrying
                 return NextResponse.json({
                     code: 'EXPIRED',
                     message: failedEntry.error,
                     results: { expired: true }
                 })
             } else {
-                // Clear old entry
                 failedDownloads.delete(messageId)
             }
         }
@@ -122,29 +63,11 @@ export async function POST(request: NextRequest) {
         // Ensure media directory exists
         await fs.mkdir(MEDIA_DIR, { recursive: true })
 
-        // Determine file extension from URL or filename
-        let ext = '.bin'
+        // Determine file extension from filename
+        let ext = '.jpg' // Default for images
         if (filename) {
-            ext = path.extname(filename) || ext
-        } else {
-            // Try to get extension from URL path
-            try {
-                const urlPath = new URL(url).pathname
-                const urlExt = path.extname(urlPath.split('?')[0])
-                if (urlExt) ext = urlExt
-            } catch {
-                // Invalid URL, use default
-            }
-        }
-
-        // Clean the extension
-        if (ext === '.enc') {
-            // WhatsApp encrypted files - guess from URL pattern
-            if (url.includes('t62.7118') || url.includes('t24/f2') || url.includes('o1/v/t24')) ext = '.jpg'
-            else if (url.includes('t62.7161')) ext = '.mp4'
-            else if (url.includes('t62.7119')) ext = '.pdf'
-            else if (url.includes('t62.7117')) ext = '.ogg'
-            else if (url.includes('audio')) ext = '.ogg'
+            const fileExt = path.extname(filename)
+            if (fileExt) ext = fileExt
         }
 
         const localFilename = `${messageId}${ext}`
@@ -153,65 +76,134 @@ export async function POST(request: NextRequest) {
         // Check if already downloaded
         try {
             await fs.access(localPath)
-            // File already exists
-            return NextResponse.json({
-                code: 'SUCCESS',
-                results: {
-                    localPath: `/api/media/${localFilename}`,
-                    filename: localFilename,
-                    cached: true
-                }
-            })
-        } catch {
-            // File doesn't exist, download it
-        }
-
-        console.log(`[Media Download] Downloading ${messageId}...`)
-        const result = await downloadFile(url, localPath)
-
-        if (!result.success) {
-            // Cache the failure to avoid repeated attempts
-            failedDownloads.set(messageId, {
-                timestamp: Date.now(),
-                error: result.error || 'Download failed'
-            })
-
-            // Clean up old entries periodically
-            if (failedDownloads.size > 1000) {
-                const now = Date.now()
-                const entries = Array.from(failedDownloads.entries())
-                for (const [key, value] of entries) {
-                    if (now - value.timestamp > FAILED_CACHE_TTL) {
-                        failedDownloads.delete(key)
-                    }
-                }
-            }
-
-            // Return appropriate response based on error type
-            if (result.statusCode === 410) {
+            const stats = await fs.stat(localPath)
+            if (stats.size > 100) {
                 return NextResponse.json({
-                    code: 'EXPIRED',
-                    message: 'Media URL has expired',
-                    results: { expired: true }
+                    code: 'SUCCESS',
+                    results: {
+                        localPath: `/api/media/${messageId}`,
+                        filename: localFilename,
+                        cached: true
+                    }
                 })
             }
+            // File exists but too small (likely error), delete and retry
+            await fs.unlink(localPath)
+        } catch {
+            // File doesn't exist, proceed with download
+        }
 
+        // Look up message in database to get the chat JID
+        const message = await prisma.message.findFirst({
+            where: { externalId: messageId },
+            include: { chat: true }
+        })
+
+        if (!message?.chat?.jid) {
+            console.log(`[Media Download] No chat JID found for message ${messageId}`)
+            // Cache failure to avoid repeated DB lookups
+            failedDownloads.set(messageId, {
+                timestamp: Date.now(),
+                error: 'Message not found in database'
+            })
             return NextResponse.json({
-                code: 'DOWNLOAD_FAILED',
-                message: result.error || 'Download failed',
+                code: 'NOT_FOUND',
+                message: 'Message not found in database',
                 results: { expired: false }
             })
         }
 
-        const stats = await fs.stat(localPath)
-        console.log(`[Media Download] Saved ${localFilename} (${stats.size} bytes)`)
+        const jid = message.chat.jid
+        const authHeader = 'Basic ' + Buffer.from(`${DIFUSION_USER}:${DIFUSION_PASS}`).toString('base64')
+
+        console.log(`[Media Download] Downloading ${messageId} via Difusion proxy...`)
+
+        // Step 1: Call Difusion API to trigger decryption
+        const downloadUrl = `${DIFUSION_URL}/message/${messageId}/download?phone=${encodeURIComponent(jid)}`
+        
+        const response = await fetch(downloadUrl, {
+            headers: { 'Authorization': authHeader }
+        })
+
+        if (!response.ok) {
+            const errorText = await response.text()
+            console.error(`[Media Download] Difusion API failed: ${response.status} - ${errorText}`)
+            
+            failedDownloads.set(messageId, {
+                timestamp: Date.now(),
+                error: `Difusion API error: ${response.status}`
+            })
+            
+            return NextResponse.json({
+                code: response.status === 410 ? 'EXPIRED' : 'DOWNLOAD_FAILED',
+                message: `Media download failed: ${response.status}`,
+                results: { expired: response.status === 410 }
+            })
+        }
+
+        const data: DifusionMediaResponse = await response.json()
+
+        if (data.code !== 'SUCCESS' || !data.results?.file_path) {
+            console.error(`[Media Download] Difusion returned error: ${data.message}`)
+            
+            failedDownloads.set(messageId, {
+                timestamp: Date.now(),
+                error: data.message || 'Difusion download failed'
+            })
+            
+            return NextResponse.json({
+                code: 'EXPIRED',
+                message: data.message || 'Media decryption failed',
+                results: { expired: true }
+            })
+        }
+
+        // Step 2: Download the decrypted file from Difusion's statics path
+        const fileUrl = `${DIFUSION_URL}/${data.results.file_path}`
+        console.log(`[Media Download] Fetching decrypted file from: ${fileUrl}`)
+
+        const fileResponse = await fetch(fileUrl, {
+            headers: { 'Authorization': authHeader }
+        })
+
+        if (!fileResponse.ok) {
+            console.error(`[Media Download] File fetch failed: ${fileResponse.status}`)
+            
+            failedDownloads.set(messageId, {
+                timestamp: Date.now(),
+                error: `Failed to fetch decrypted file: ${fileResponse.status}`
+            })
+            
+            return NextResponse.json({
+                code: 'DOWNLOAD_FAILED',
+                message: 'Failed to fetch decrypted media',
+                results: { expired: false }
+            })
+        }
+
+        const mediaBuffer = Buffer.from(await fileResponse.arrayBuffer())
+
+        // Update extension based on actual content
+        if (mediaBuffer[0] === 0xff && mediaBuffer[1] === 0xd8) {
+            ext = '.jpg'
+        } else if (mediaBuffer.slice(4, 8).toString() === 'ftyp') {
+            ext = '.mp4'
+        } else if (mediaBuffer.slice(0, 4).toString() === 'OggS') {
+            ext = '.ogg'
+        }
+
+        const finalFilename = `${messageId}${ext}`
+        const finalPath = path.join(MEDIA_DIR, finalFilename)
+
+        await fs.writeFile(finalPath, mediaBuffer)
+        console.log(`[Media Download] Saved ${finalFilename} (${mediaBuffer.length} bytes)`)
 
         return NextResponse.json({
             code: 'SUCCESS',
             results: {
-                localPath: `/api/media/${localFilename}`,
-                filename: localFilename,
-                size: stats.size,
+                localPath: `/api/media/${messageId}`,
+                filename: finalFilename,
+                size: mediaBuffer.length,
                 cached: false
             }
         })

@@ -84,6 +84,11 @@ test.describe('Propaganda CRM E2E Tests', () => {
     console.log('🔹 /api/chats response:', JSON.stringify(apiResponse, null, 2))
     
     expect(apiResponse.status).toBe(200)
+    
+    // Verify chats have data from PostgreSQL
+    const chats = apiResponse.data?.results?.data || []
+    console.log(`🔹 Found ${chats.length} chats in database`)
+    expect(chats.length).toBeGreaterThan(0)
   })
 
   test('should load devices/connections page', async ({ page }) => {

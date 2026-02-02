@@ -10,7 +10,7 @@ export interface JWTPayload {
 }
 
 // Routes that don't require authentication
-const publicRoutes = ['/login', '/api/auth/login', '/api/auth/session', '/api/auth/logout', '/api/init', '/api/media']
+const publicRoutes = ['/login', '/api/auth/login', '/api/auth/session', '/api/auth/logout', '/api/init', '/api/media', '/api/webhook']
 
 // Routes that require admin access
 const adminRoutes = ['/admin', '/api/accounts']
